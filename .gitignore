@@ -1,0 +1,29 @@
+# Virtual Environment
+venv/
+env/
+ENV/
+.env
+.venv
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Temporary and upload directories
+uploads/
+tmp/
+
+# Model Files (Optional: If you don't want to push the 4MB training weights, uncomment this)
+mnist_model.pth
+
+# Debug Images
+debug_*
+
+# IDEs
+.idea/
+.vscode/
+
+# OS Specific
+.DS_Store
+Thumbs.db

@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MarkSense AI | Professional Assessment Engine</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div id="toast-container"></div>
+    
+    <div class="desk-container">
+        <!-- Header area with SVG Animation -->
+        <header class="desk-header">
+            <svg class="animated-logo" viewBox="0 0 600 120">
+                <text x="50%" y="50%">MarkSense AI</text>
+            </svg>
+            <p>Intelligence-Driven Automated Assessment</p>
+        </header>
+
+        <!-- Main Column: The Scanner -->
+        <main class="main-action-area">
+            <div class="glass-card">
+                <h2 class="card-title">
+                    <svg style="width: 24px; height: 24px; stroke: var(--accent); fill: none; stroke-width: 2;" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                    New Assessment Protocol
+                </h2>
+                
+                <div class="input-row">
+                    <label for="rollNumber">Student Identifier (Roll No)</label>
+                    <input type="text" id="rollNumber" class="modern-input" placeholder="e.g. CS-2024-001" required>
+                </div>
+                
+                <form id="uploadForm">
+                    <!-- Clean Drop Zone -->
+                    <div class="drop-zone" id="dropZone" tabindex="0">
+                        <div class="drop-icon">
+                            <svg style="width: 32px; height: 32px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="17 8 12 3 7 8"></polyline>
+                                <line x1="12" y1="3" x2="12" y2="15"></line>
+                            </svg>
+                        </div>
+                        <h3 class="drop-title">Upload High-Res Document</h3>
+                        <p class="drop-desc">Drag & drop your scanned sheet here or click to browse files.</p>
+                        <input type="file" id="fileInput" accept=".png, .jpg, .jpeg" required>
+                    </div>
+                    
+                    <div style="margin-top: 2rem;">
+                        <button type="submit" id="processBtn" class="btn-modern" disabled>
+                            <svg style="width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2;" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                            Execute Scan & Verify
+                        </button>
+                    </div>
+                </form>
+
+                <div id="loadingOverlay" class="hidden">
+                    <svg class="modern-spinner" viewBox="0 0 50 50">
+                        <circle cx="25" cy="25" r="20"></circle>
+                    </svg>
+                    <p style="font-weight: 500; color: var(--accent);">Processing neural extraction core...</p>
+                </div>
+
+                <!-- Editable Results Area -->
+                <div id="resultsArea" class="results-container hidden">
+                    <h3 class="card-title" style="font-size: 1.25rem; border-top: 1px solid #e2e8f0; padding-top: 2rem; margin-top: 2rem;">
+                        Extracted Data Matrix
+                    </h3>
+                    
+                    <form id="updateForm">
+                        <div id="marksGrid" class="marks-grid">
+                            <!-- Injected JS Data -->
+                        </div>
+                        
+                        <div class="total-score-box">
+                            <div class="total-score-label">Final Aggregated Score</div>
+                            <div class="total-score-val" id="totalMarkValue">0</div>
+                        </div>
+                        
+                        <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                            <button type="submit" class="btn-modern" style="flex: 1;">Secure Edits to Cloud</button>
+                            <button type="button" id="exportBtn" class="btn-modern btn-success" style="flex: 1;">Export to Excel (.xlsx)</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </main>
+
+        <!-- Right Column: Info & History -->
+        <aside class="side-panel">
+            
+            <div id="sopCard" class="glass-card">
+                <h3 class="card-title" style="font-size: 1.1rem; text-transform: uppercase;">
+                    <svg style="width: 20px; height: 20px; stroke: var(--accent); fill: none; stroke-width: 2;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                    Standard Operating Procedure
+                </h3>
+                <div class="steps-wrapper">
+                    <div class="step-item">
+                        <div class="step-number">1</div>
+                        <div class="step-text">
+                            <h4>Target Provision</h4>
+                            <p>Input the unique Student Identifier.</p>
+                        </div>
+                    </div>
+                    <div class="step-item">
+                        <div class="step-number">2</div>
+                        <div class="step-text">
+                            <h4>Data Acquisition</h4>
+                            <p>Upload a clear photograph of the assessment sheet.</p>
+                        </div>
+                    </div>
+                    <div class="step-item">
+                        <div class="step-number">3</div>
+                        <div class="step-text">
+                            <h4>Execution & Validation</h4>
+                            <p>Verify extracted marks. Any discrepancies can be manually corrected in the matrix.</p>
+                        </div>
+                    </div>
+                    <div class="step-item">
+                        <div class="step-number">4</div>
+                        <div class="step-text">
+                            <h4>Export Pipeline</h4>
+                            <p>Save verified data and export directly to a formatted Excel file.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="rightPreviewContainer" class="glass-card hidden">
+                <h3 class="card-title" style="font-size: 1.1rem; text-transform: uppercase;">
+                    <svg style="width: 20px; height: 20px; stroke: var(--accent); fill: none; stroke-width: 2;" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                    Target Document Preview
+                </h3>
+                <div style="background: #ffffff; padding: 0.5rem; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 1.5rem;">
+                    <img id="imagePreview" alt="Assessment Document" style="width: 100%; max-height: 480px; object-fit: contain; display: block; background: #f8fafc; border-radius: 8px;">
+                </div>
+                <button type="button" id="changeImageBtn" class="btn-modern outline" style="width: 100%;">Change Document</button>
+            </div>
+
+            <div class="glass-card">
+                <h3 class="card-title" style="font-size: 1.1rem; text-transform: uppercase;">
+                    <svg style="width: 20px; height: 20px; stroke: var(--accent); fill: none; stroke-width: 2;" viewBox="0 0 24 24"><path d="M12 20v-6M6 20V10M18 20V4"></path></svg>
+                    Session History
+                </h3>
+                <ul class="history-list" id="scanHistoryList">
+                    <li style="text-align: center; color: var(--text-muted); font-style: italic; padding: 2rem 0; font-size: 0.95rem;">No intelligence gathered this session.</li>
+                </ul>
+            </div>
+            
+        </aside>
+    </div>
+
+    <!-- Frontend logic (LocalStorage + API interactions) preserved & adjusted for new IDs -->
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const rollNumberInput = document.getElementById('rollNumber');
+        const processBtn = document.getElementById('processBtn');
+        const rightPreviewContainer = document.getElementById('rightPreviewContainer');
+        const sopCard = document.getElementById('sopCard');
+        const imagePreview = document.getElementById('imagePreview');
+        const changeImageBtn = document.getElementById('changeImageBtn');
+        const uploadForm = document.getElementById('uploadForm');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const resultsArea = document.getElementById('resultsArea');
+        const marksGrid = document.getElementById('marksGrid');
+        const updateForm = document.getElementById('updateForm');
+        const totalMarkValue = document.getElementById('totalMarkValue');
+        const exportBtn = document.getElementById('exportBtn');
+        const scanHistoryList = document.getElementById('scanHistoryList');
+        const toastContainer = document.getElementById('toast-container');
+
+        function checkFormState() {
+            if (rollNumberInput.value.trim() && fileInput.files.length > 0) {
+                processBtn.disabled = false;
+            } else {
+                processBtn.disabled = true;
+            }
+        }
+
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            const iconSvg = type === 'success' 
+                ? `<svg style="width: 22px; height: 22px; stroke: var(--success); fill: none; stroke-width: 2.5;" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>`
+                : `<svg style="width: 22px; height: 22px; stroke: var(--error); fill: none; stroke-width: 2.5;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>`;
+
+            toast.innerHTML = `${iconSvg}<span class="toast-msg">${message}</span>`;
+            toastContainer.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.classList.add('hide');
+                toast.addEventListener('animationend', () => toast.remove());
+            }, 4000);
+        }
+
+        function loadHistory() {
+            const history = JSON.parse(localStorage.getItem('marksense_history')) || [];
+            if (history.length > 0) {
+                scanHistoryList.innerHTML = '';
+                history.slice(0, 5).forEach(item => {
+                    const li = document.createElement('li');
+                    li.className = 'history-item';
+                    li.innerHTML = `
+                        <span class="history-id">${item.rollNumber}</span>
+                        <span class="history-score">${item.total}</span>
+                    `;
+                    scanHistoryList.appendChild(li);
+                });
+            }
+        }
+        
+        function addHistoryRecord(rollNumber, total) {
+            const history = JSON.parse(localStorage.getItem('marksense_history')) || [];
+            history.unshift({ rollNumber, total, date: new Date().toISOString() });
+            localStorage.setItem('marksense_history', JSON.stringify(history));
+            loadHistory();
+        }
+
+        loadHistory();
+
+        dropZone.addEventListener('click', () => fileInput.click());
+        
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+            document.body.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) { e.preventDefault(); e.stopPropagation(); }
+
+        ['dragenter', 'dragover'].forEach(eventName => { dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false); });
+        ['dragleave', 'drop'].forEach(eventName => { dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false); });
+
+        dropZone.addEventListener('drop', (e) => {
+            const dt = e.dataTransfer;
+            if (dt.files && dt.files.length) {
+                fileInput.files = dt.files;
+                handleFiles();
+            }
+        }, false);
+
+        fileInput.addEventListener('change', handleFiles);
+        rollNumberInput.addEventListener('input', checkFormState);
+
+        function handleFiles() {
+            if (fileInput.files && fileInput.files[0]) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    imagePreview.src = e.target.result;
+                    dropZone.classList.add('hidden');
+                    sopCard.classList.add('hidden');
+                    rightPreviewContainer.classList.remove('hidden');
+                    checkFormState();
+                }
+                reader.readAsDataURL(fileInput.files[0]);
+            }
+        }
+
+        changeImageBtn.addEventListener('click', resetUpload);
+
+        function resetUpload() {
+            fileInput.value = '';
+            document.querySelector('.desk-container').classList.remove('layout-scanning');
+            document.body.classList.remove('scanning-mode');
+            rightPreviewContainer.classList.add('hidden');
+            sopCard.classList.remove('hidden');
+            dropZone.classList.remove('hidden');
+            resultsArea.classList.add('hidden');
+            checkFormState();
+        }
+
+        let currentUploadedData = null;
+
+        function recalculateTotal() {
+            let sum = 0;
+            const inputs = document.querySelectorAll('.editable-m-value');
+            inputs.forEach(input => {
+                sum += parseFloat(input.value) || 0;
+            });
+            totalMarkValue.textContent = sum;
+        }
+
+        function getGridResults() {
+            const results = [];
+            const formData = new FormData(updateForm);
+            let i = 0;
+            while(formData.has(`mark_${i}`)) {
+                results.push({
+                    question: formData.get(`question_${i}`),
+                    mark: formData.get(`mark_${i}`)
+                });
+                i++;
+            }
+            return results;
+        }
+
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!rollNumberInput.value || !fileInput.files[0]) return;
+
+            const formData = new FormData();
+            formData.append('roll_number', rollNumberInput.value);
+            formData.append('file', fileInput.files[0]);
+            formData.append('session_id', 'default_session');
+
+            // Trigger animations
+            document.querySelector('.desk-container').classList.add('layout-scanning');
+            document.body.classList.add('scanning-mode');
+
+            loadingOverlay.classList.remove('hidden');
+            resultsArea.classList.add('hidden');
+            processBtn.disabled = true;
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json' },
+                    body: formData
+                });
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    showToast(`Acquired intelligence for Target ID: ${data.roll_number}`);
+                    currentUploadedData = data;
+                    marksGrid.innerHTML = '';
+                    
+                    data.results.forEach((item, idx) => {
+                        const markCard = document.createElement('div');
+                        markCard.className = 'mark-box';
+                        markCard.innerHTML = `
+                            <div class="q-label">${item.question}</div>
+                            <input type="number" 
+                                class="editable-m-value" 
+                                name="mark_${idx}" 
+                                id="mark_${idx}" 
+                                value="${item.mark}"
+                                step="any"
+                                onchange="recalculateTotal()"
+                                onkeyup="recalculateTotal()">
+                            <input type="hidden" name="question_${idx}" value="${item.question}">
+                        `;
+                        marksGrid.appendChild(markCard);
+                    });
+                    
+                    totalMarkValue.textContent = data.total;
+                    recalculateTotal();
+                    resultsArea.classList.remove('hidden');
+                    addHistoryRecord(data.roll_number, data.total);
+                    
+                    if (data.debug_img) {
+                        imagePreview.src = `/download/default_session/${data.debug_img}`;
+                    }
+                } else {
+                    showToast(data.error || "Unknown telemetry error during processing.", 'error');
+                    resetUpload();
+                }
+            } catch (err) {
+                showToast("Connection to the AI Core failed. Is the cluster active?", 'error');
+                resetUpload();
+            } finally {
+                loadingOverlay.classList.add('hidden');
+                document.querySelector('.desk-container').classList.remove('layout-scanning');
+                document.body.classList.remove('scanning-mode');
+            }
+        });
+
+        updateForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!currentUploadedData) return;
+            
+            const btn = e.submitter;
+            const originalText = btn.innerHTML;
+            btn.innerHTML = 'Securing...';
+            btn.disabled = true;
+
+            const payload = {
+                roll_number: currentUploadedData.roll_number,
+                results: getGridResults(),
+                excel_file: currentUploadedData.excel_file,
+                session_id: 'default_session'
+            };
+
+            try {
+                const response = await fetch('/update_marks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    showToast("Edits saved and synchronized successfully.");
+                    
+                    const roll = currentUploadedData.roll_number;
+                    const history = JSON.parse(localStorage.getItem('marksense_history')) || [];
+                    if(history.length > 0 && history[0].rollNumber === roll) {
+                        history[0].total = totalMarkValue.textContent;
+                        localStorage.setItem('marksense_history', JSON.stringify(history));
+                        loadHistory();
+                    }
+                } else {
+                    showToast(data.error || "Failed to finalize edits.", 'error');
+                }
+            } catch (err) {
+                showToast("Network disruption while securing variables.", 'error');
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        });
+
+        exportBtn.addEventListener('click', async () => {
+            if (!currentUploadedData) return;
+            showToast("Generating Excel batch file...");
+            
+            exportBtn.disabled = true;
+            exportBtn.innerHTML = "Exporting...";
+
+            const payload = {
+                roll_number: currentUploadedData.roll_number,
+                results: getGridResults(),
+                session_id: 'default_session'
+            };
+
+            try {
+                const response = await fetch('/export_edited_marks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!response.ok) throw new Error("Export failed on server.");
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `marks_${currentUploadedData.roll_number}_edited.xlsx`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+                showToast("Download Initialized!");
+            } catch (err) {
+                showToast("Failed to generate export file.", 'error');
+            } finally {
+                exportBtn.disabled = false;
+                exportBtn.innerHTML = "Export to Excel (.xlsx)";
+            }
+        });
+        
+        checkFormState();
+    </script>
+</body>
+</html>

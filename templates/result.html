@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MarkSense AI | Assessment Matrix</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div id="toast-container"></div>
+    
+    <div class="desk-container" style="justify-content: center;">
+        <!-- Header area -->
+        <header class="desk-header">
+            <svg class="animated-logo" viewBox="0 0 600 120" style="height: 80px;">
+                <text x="50%" y="50%">Processing Yield</text>
+            </svg>
+            <p>Intelligence extraction finalized for Target ID</p>
+        </header>
+
+        <!-- Main Column -->
+        <main class="main-action-area" style="max-width: 900px; flex: none;">
+            <div class="glass-card">
+                
+                <h2 class="card-title" style="font-size: 2.5rem; justify-content: center; margin-bottom: 2rem; color: var(--accent);">
+                    Target ID: {{ roll_number }}
+                </h2>
+
+                <section class="results-container">
+                    {% if error %}
+                        <div class="glass-card" style="background: #fef2f2; border-color: #fecaca; margin-bottom: 2rem;">
+                            <h3 style="font-size: 1.5rem; color: var(--error); margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+                                <svg style="width: 24px; height: 24px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                                Intelligence Acquisition Failure
+                            </h3>
+                            <p style="color: #991b1b;">{{ error }}</p>
+                        </div>
+                    {% elif results %}
+                        
+                        <div style="margin-bottom: 3rem;">
+                            <h3 class="card-title" style="font-size: 1.25rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 1rem;">
+                                Extracted Matrix
+                            </h3>
+                            
+                            <div class="marks-grid">
+                                {% for item in results %}
+                                    <div class="mark-box">
+                                        <div class="q-label">{{ item.question }}</div>
+                                        <div class="editable-m-value" style="color: var(--text-primary); border: none;">{{ item.mark }}</div>
+                                    </div>
+                                {% endfor %}
+                            </div>
+
+                            <div class="total-score-box">
+                                <div class="total-score-label">Final Evaluated Score</div>
+                                <div class="total-score-val">{{ total }}</div>
+                            </div>
+                        </div>
+                    
+                        <div style="margin-bottom: 3rem;">
+                            <h3 class="card-title" style="font-size: 1.25rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 1rem;">
+                                Neural Vision Core Bounding Diagram
+                            </h3>
+                            <div style="background: #ffffff; padding: 1rem; border-radius: 16px; border: 1px solid #e2e8f0; box-shadow: var(--shadow-sm);">
+                                <img src="/download/{{ debug_img }}" alt="Contour Topology" style="width: 100%; display: block; border-radius: 8px;">
+                            </div>
+                        </div>
+                        
+                        <div style="text-align: center; margin-top: 3rem;">
+                            <a href="/download/{{ excel_file }}" class="btn-modern btn-success" style="padding: 1.25rem 3rem;">
+                                <svg style="width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2; margin-right: 0.5rem;" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                Obtain Verified Database (.xlsx)
+                            </a>
+                        </div>
+                    {% else %}
+                        <div class="glass-card" style="background: #fffbeb; border-color: #fde68a; margin-bottom: 2rem;">
+                            <h3 style="font-size: 1.5rem; color: #b45309; margin-bottom: 0.5rem;">Target Signal Lost</h3>
+                            <p style="color: #92400e;">The Core failed to detect recognizable data geometries.</p>
+                        </div>
+                    {% endif %}
+                </section>
+                
+                <div style="text-align: center; margin-top: 4rem; border-top: 1px solid #e2e8f0; padding-top: 2rem;">
+                    <a href="/" class="btn-modern outline">
+                        <svg style="width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2; margin-right: 0.5rem;" viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+                        Initialize New Sequence
+                    </a>
+                </div>
+                
+            </div>
+        </main>
+    </div>
+</body>
+</html>
