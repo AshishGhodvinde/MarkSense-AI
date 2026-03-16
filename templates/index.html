@@ -5,8 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MarkSense AI | Professional Assessment Engine</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r121/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vanta@latest/dist/vanta.net.min.js"></script>
 </head>
 <body>
+    <!-- Vanta.js Animated Background Container -->
+    <div id="vanta-bg"></div>
+    
     <div id="toast-container"></div>
     
     <div class="desk-container">
@@ -508,6 +513,28 @@
         });
         
         checkFormState();
+        
+        // Initialize Vanta.js Animated Background
+        document.addEventListener('DOMContentLoaded', function() {
+            if (window.VANTA) {
+                window.VANTA.NET({
+                    el: "#vanta-bg",
+                    mouseControls: true,
+                    touchControls: true,
+                    gyroControls: false,
+                    minHeight: 200.00,
+                    minWidth: 200.00,
+                    scale: 1.00,
+                    scaleMobile: 1.00,
+                    color: 0x0284c7,  // Matches --accent color (#0284c7)
+                    backgroundColor: 0xf8fafc,  // Matches --bg-color (#f8fafc)
+                    points: 10,
+                    maxDistance: 20,
+                    spacing: 15,
+                    showDots: true
+                });
+            }
+        });
     </script>
 </body>
 </html>
