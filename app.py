@@ -98,6 +98,37 @@ def export_edited_marks():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/export_all_session', methods=['POST'])
+def export_all_session():
+    try:
+        data = request.get_json()
+        session_id = data.get('session_id', 'default_session')
+        
+        # Get all history from session data
+        session_history = data.get('session_history', [])
+        
+        if not session_history:
+            return jsonify({'success': False, 'error': 'No session data found'})
+        
+        # Create comprehensive Excel file with all session data
+        session_folder = os.path.join(app.config['UPLOAD_FOLDER'], session_id)
+        os.makedirs(session_folder, exist_ok=True)
+        
+        # Generate unique filename with timestamp
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        export_filename = f'marks_session_{timestamp}.xlsx'
+        export_path = os.path.join(session_folder, export_filename)
+        
+        # Export all session data to Excel
+        from processor import export_session_to_excel
+        export_session_to_excel(session_history, export_path)
+        
+        # Return the file for download
+        return send_file(export_path, as_attachment=True, download_name=export_filename)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
 @app.route('/download/<session_id>/<filename>')
 def download_file(session_id, filename):
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], session_id, filename)

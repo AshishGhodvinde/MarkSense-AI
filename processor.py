@@ -301,3 +301,35 @@ def export_to_excel(roll_number, extracted_data, total, output_path):
         
     df_combined.to_excel(output_path, index=False)
     return output_path
+
+def export_session_to_excel(session_history, output_path):
+    """Export all session data to a single Excel file"""
+    all_data = []
+    
+    for record in session_history:
+        roll_number = record.get('rollNumber', 'Unknown')
+        total = record.get('total', 0)
+        date = record.get('date', '')
+        
+        # Create a row for each student - start with basic info
+        row_data = {
+            'Roll Number': roll_number,
+            'Date': date
+        }
+        
+        # Add individual marks if available (before total)
+        if 'results' in record:
+            for result in record['results']:
+                question = result.get('question', '')
+                mark = result.get('mark', 0)
+                row_data[f'Q_{question}'] = mark
+        
+        # Add Total Score at the end
+        row_data['Total Score'] = total
+        
+        all_data.append(row_data)
+    
+    if all_data:
+        df = pd.DataFrame(all_data)
+        df.to_excel(output_path, index=False)
+    return output_path

@@ -134,7 +134,7 @@
                 <div style="background: #ffffff; padding: 0.5rem; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 1.5rem;">
                     <img id="imagePreview" alt="Assessment Document" style="width: 100%; max-height: 480px; object-fit: contain; display: block; background: #f8fafc; border-radius: 8px;">
                 </div>
-                <button type="button" id="changeImageBtn" class="btn-modern outline" style="width: 100%;">Change Document</button>
+                <button type="button" id="changeImageBtn" class="btn-modern outline" style="width: 100%;">Next Marksheet</button>
             </div>
 
             <div class="glass-card">
@@ -194,11 +194,15 @@
             }, 4000);
         }
 
+        // Clear session storage on page load to ensure fresh session
+        sessionStorage.removeItem('marksense_history');
+        
         function loadHistory() {
-            const history = JSON.parse(localStorage.getItem('marksense_history')) || [];
+            const history = JSON.parse(sessionStorage.getItem('marksense_history')) || [];
             if (history.length > 0) {
                 scanHistoryList.innerHTML = '';
-                history.slice(0, 5).forEach(item => {
+                // Display latest items at top for UI (reverse order) but maintain original order for export
+                history.slice().reverse().slice(0, 5).forEach(item => {
                     const li = document.createElement('li');
                     li.className = 'history-item';
                     li.innerHTML = `
@@ -210,10 +214,14 @@
             }
         }
         
-        function addHistoryRecord(rollNumber, total) {
-            const history = JSON.parse(localStorage.getItem('marksense_history')) || [];
-            history.unshift({ rollNumber, total, date: new Date().toISOString() });
-            localStorage.setItem('marksense_history', JSON.stringify(history));
+        function addHistoryRecord(rollNumber, total, results = null) {
+            const history = JSON.parse(sessionStorage.getItem('marksense_history')) || [];
+            const record = { rollNumber, total, date: new Date().toISOString() };
+            if (results) {
+                record.results = results;
+            }
+            history.push(record); // Use push() to maintain scan order (first scanned = first row)
+            sessionStorage.setItem('marksense_history', JSON.stringify(history));
             loadHistory();
         }
 
@@ -345,7 +353,7 @@
                     totalMarkValue.textContent = data.total;
                     recalculateTotal();
                     resultsArea.classList.remove('hidden');
-                    addHistoryRecord(data.roll_number, data.total);
+                    addHistoryRecord(data.roll_number, data.total, data.results);
                     
                     if (data.debug_img) {
                         imagePreview.src = `/download/default_session/${data.debug_img}`;
@@ -392,10 +400,10 @@
                     showToast("Edits saved and synchronized successfully.");
                     
                     const roll = currentUploadedData.roll_number;
-                    const history = JSON.parse(localStorage.getItem('marksense_history')) || [];
+                    const history = JSON.parse(sessionStorage.getItem('marksense_history')) || [];
                     if(history.length > 0 && history[0].rollNumber === roll) {
                         history[0].total = totalMarkValue.textContent;
-                        localStorage.setItem('marksense_history', JSON.stringify(history));
+                        sessionStorage.setItem('marksense_history', JSON.stringify(history));
                         loadHistory();
                     }
                 } else {
@@ -411,40 +419,91 @@
 
         exportBtn.addEventListener('click', async () => {
             if (!currentUploadedData) return;
-            showToast("Generating Excel batch file...");
             
-            exportBtn.disabled = true;
-            exportBtn.innerHTML = "Exporting...";
-
-            const payload = {
-                roll_number: currentUploadedData.roll_number,
-                results: getGridResults(),
-                session_id: 'default_session'
-            };
-
-            try {
-                const response = await fetch('/export_edited_marks', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
+            // Check if we want to export all session data or just current
+            const sessionHistory = JSON.parse(sessionStorage.getItem('marksense_history')) || [];
+            const exportAll = sessionHistory.length > 1;
+            
+            if (exportAll) {
+                // Export all session data
+                showToast("Generating complete session Excel file...");
                 
-                if (!response.ok) throw new Error("Export failed on server.");
-                const blob = await response.blob();
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `marks_${currentUploadedData.roll_number}_edited.xlsx`;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                window.URL.revokeObjectURL(url);
-                showToast("Download Initialized!");
-            } catch (err) {
-                showToast("Failed to generate export file.", 'error');
-            } finally {
-                exportBtn.disabled = false;
-                exportBtn.innerHTML = "Export to Excel (.xlsx)";
+                exportBtn.disabled = true;
+                exportBtn.innerHTML = "Exporting Session...";
+
+                const payload = {
+                    session_id: 'default_session',
+                    session_history: sessionHistory
+                };
+
+                try {
+                    const response = await fetch('/export_all_session', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    
+                    if (!response.ok) throw new Error("Export failed on server.");
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    // Get filename from response headers or use timestamp
+                    const contentDisposition = response.headers.get('content-disposition');
+                    let filename = 'marks_session_complete.xlsx';
+                    if (contentDisposition) {
+                        const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+                        if (filenameMatch) filename = filenameMatch[1];
+                    }
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    window.URL.revokeObjectURL(url);
+                    showToast("Complete session exported successfully!");
+                } catch (err) {
+                    showToast("Failed to generate session export file.", 'error');
+                } finally {
+                    exportBtn.disabled = false;
+                    exportBtn.innerHTML = "Export to Excel (.xlsx)";
+                }
+            } else {
+                // Export single marksheet (existing logic)
+                showToast("Generating Excel batch file...");
+                
+                exportBtn.disabled = true;
+                exportBtn.innerHTML = "Exporting...";
+
+                const payload = {
+                    roll_number: currentUploadedData.roll_number,
+                    results: getGridResults(),
+                    session_id: 'default_session'
+                };
+
+                try {
+                    const response = await fetch('/export_edited_marks', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    
+                    if (!response.ok) throw new Error("Export failed on server.");
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `marks_${currentUploadedData.roll_number}_edited.xlsx`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    window.URL.revokeObjectURL(url);
+                    showToast("Download Initialized!");
+                } catch (err) {
+                    showToast("Failed to generate export file.", 'error');
+                } finally {
+                    exportBtn.disabled = false;
+                    exportBtn.innerHTML = "Export to Excel (.xlsx)";
+                }
             }
         });
         
