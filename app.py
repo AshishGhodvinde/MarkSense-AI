@@ -2,7 +2,7 @@ from flask import Flask, request, render_template, jsonify, send_file # type: ig
 import os
 import werkzeug # type: ignore
 import uuid
-from processor import process_image, export_to_excel # type: ignore
+from processor import process_image, export_to_excel, export_session_to_excel # type: ignore
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
@@ -11,6 +11,56 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 @app.route('/', methods=['GET'])
 def index():
     return render_template('index.html')
+
+@app.route('/mobile')
+def mobile_interface():
+    """Mobile capture interface"""
+    return render_template('mobile.html')
+
+@app.route('/api/mobile_upload', methods=['POST'])
+def mobile_upload():
+    """Handle mobile image upload"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': 'No file part'})
+        
+        file = request.files['file']
+        roll_number = request.form.get('roll_number', 'Unknown')
+        laptop_ip = request.form.get('laptop_ip', 'localhost')
+        
+        if file.filename == '':
+            return jsonify({'success': False, 'error': 'No selected file'})
+        
+        # Use existing upload logic
+        session_id = 'default_session'
+        
+        if file and werkzeug.utils.secure_filename(file.filename):
+            filename = werkzeug.utils.secure_filename(file.filename)
+            session_folder = os.path.join(app.config['UPLOAD_FOLDER'], session_id)
+            os.makedirs(session_folder, exist_ok=True)
+            
+            file_path = os.path.join(session_folder, filename)
+            file.save(file_path)
+            
+            # Process image using existing logic
+            try:
+                results, total, debug_img = process_image(file_path, session_folder)
+                
+                return jsonify({
+                    'success': True,
+                    'message': 'Image uploaded and processed successfully',
+                    'roll_number': roll_number,
+                    'results': results,
+                    'total': total,
+                    'debug_img': debug_img
+                })
+            except Exception as e:
+                return jsonify({'success': False, 'error': f'Processing failed: {str(e)}'})
+        
+        return jsonify({'success': False, 'error': 'Invalid file'})
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Upload failed: {str(e)}'})
 
 @app.route('/upload', methods=['POST'])
 def upload_file():

@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MarkSense AI Mobile | Capture Interface</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r121/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vanta@latest/dist/vanta.net.min.js"></script>
+    <style>
+        /* Mobile-specific styles */
+        .mobile-container {
+            max-width: 100%;
+            width: 100%;
+            margin: 0 auto;
+            padding: 1rem;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            z-index: 10;
+            position: relative;
+        }
+        
+        .mobile-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        
+        .mobile-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(25px);
+            -webkit-backdrop-filter: blur(25px);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            padding: 2rem;
+            margin-bottom: 1.5rem;
+            box-shadow: var(--shadow-sm);
+            transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94), box-shadow 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+        }
+        
+        .mobile-card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+        }
+        
+        .camera-container {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 4/3;
+            background: #000;
+            border-radius: 16px;
+            overflow: hidden;
+            margin-bottom: 1rem;
+        }
+        
+        #camera-video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        #camera-canvas {
+            display: none;
+        }
+        
+        .camera-controls {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            margin-bottom: 1rem;
+        }
+        
+        .btn-capture {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 1rem 2rem;
+            border-radius: 50px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .btn-capture:hover {
+            background: var(--accent-hover);
+            transform: translateY(-2px);
+        }
+        
+        .btn-capture:disabled {
+            background: var(--text-muted);
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .laptop-ip-input {
+            width: 100%;
+            padding: 1rem;
+            background: rgba(255, 255, 255, 0.8);
+            border: 2px solid var(--glass-border);
+            border-radius: 12px;
+            font-size: 1rem;
+            color: var(--text-primary);
+            outline: none;
+            transition: all 0.3s ease;
+            margin-bottom: 1rem;
+        }
+        
+        .laptop-ip-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 4px rgba(2, 132, 199, 0.1);
+        }
+        
+        .upload-status {
+            text-align: center;
+            padding: 1rem;
+            border-radius: 12px;
+            font-weight: 500;
+            margin-top: 1rem;
+        }
+        
+        .status-ready {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+        
+        .status-uploading {
+            background: rgba(245, 158, 11, 0.1);
+            color: var(--warning);
+            border: 1px solid rgba(245, 158, 11, 0.2);
+        }
+        
+        .status-error {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--error);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+        
+        .captured-preview {
+            width: 100%;
+            aspect-ratio: 4/3;
+            object-fit: cover;
+            border-radius: 16px;
+            margin-bottom: 1rem;
+        }
+        
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+            width: 100%;
+        }
+        
+        .file-input-wrapper input[type=file] {
+            position: absolute;
+            left: -9999px;
+        }
+        
+        .file-input-label {
+            display: block;
+            width: 100%;
+            padding: 1rem;
+            background: rgba(255, 255, 255, 0.8);
+            border: 2px dashed var(--accent);
+            border-radius: 12px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 500;
+            color: var(--accent);
+        }
+        
+        .file-input-label:hover {
+            background: rgba(2, 132, 199, 0.1);
+            border-color: var(--accent-hover);
+        }
+        
+        @media (max-width: 768px) {
+            .mobile-container {
+                padding: 0.5rem;
+            }
+            
+            .mobile-card {
+                padding: 1.5rem;
+                margin-bottom: 1rem;
+            }
+            
+            .animated-logo text {
+                font-size: 3rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Vanta.js Animated Background Container -->
+    <div id="vanta-bg"></div>
+    
+    <div class="mobile-container">
+        <!-- Header area with SVG Animation -->
+        <header class="mobile-header">
+            <svg class="animated-logo" viewBox="0 0 600 120">
+                <text x="50%" y="50%">MarkSense AI</text>
+            </svg>
+            <p>Mobile Capture Interface</p>
+        </header>
+
+        <!-- Roll Number Input -->
+        <div class="mobile-card">
+            <h3 class="card-title">📝 Roll Number</h3>
+            <input type="text" id="rollNumberInput" class="laptop-ip-input" placeholder="Enter Roll Number" maxlength="20">
+        </div>
+
+        <!-- Laptop IP Configuration -->
+        <div class="mobile-card">
+            <h3 class="card-title">🖥️ Laptop IP Address</h3>
+            <input type="text" id="laptopIpInput" class="laptop-ip-input" placeholder="e.g., 192.168.1.100" value="localhost">
+            <small style="color: var(--text-muted);">Make sure mobile and laptop are on same WiFi</small>
+        </div>
+
+        <!-- Camera Capture -->
+        <div class="mobile-card">
+            <h3 class="card-title">📸 Capture Marksheet</h3>
+            
+            <!-- Ultra-lightweight approach: Direct upload without preview -->
+            <div class="file-input-wrapper" style="margin-bottom: 1rem;">
+                <input type="file" id="directFileInput" accept="image/*" capture="environment">
+                <label for="directFileInput" class="file-input-label">
+                    📸 Capture & Send Directly
+                </label>
+                <small style="color: var(--text-muted); display: block; margin-top: 0.5rem;">
+                    No preview, minimal memory usage
+                </small>
+            </div>
+            
+            <!-- Alternative: Simple file input -->
+            <div style="text-align: center; margin: 1rem 0;">
+                <small style="color: var(--text-muted);">OR</small>
+            </div>
+            
+            <div class="file-input-wrapper">
+                <input type="file" id="simpleFileInput" accept="image/*">
+                <label for="simpleFileInput" class="file-input-label">
+                    📁 Choose File (No Preview)
+                </label>
+            </div>
+            
+            <!-- Hidden preview (only if absolutely necessary) -->
+            <img id="capturedPreview" class="captured-preview" style="display: none;">
+            
+            <!-- Memory indicator -->
+            <div id="memoryIndicator" style="margin-top: 1rem; padding: 0.5rem; border-radius: 8px; background: rgba(2, 132, 199, 0.1); color: var(--accent); font-size: 0.9rem; text-align: center; display: none;">
+                Memory usage: <span id="memoryUsage">0</span>%
+            </div>
+        </div>
+
+        <!-- Upload Section -->
+        <div class="mobile-card">
+            <h3 class="card-title">📤 Send to Laptop</h3>
+            <button id="sendToLaptopBtn" class="btn-capture" style="width: 100%; justify-content: center;" disabled>
+                📤 Send to Laptop
+            </button>
+            
+            <div id="uploadStatus" class="upload-status status-ready">
+                Ready to capture and send
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Ultra-lightweight mobile capture - Minimal memory usage
+        let currentFile = null;
+        let currentRollNumber = '';
+        let currentLaptopIp = '';
+        let memoryMonitorInterval = null;
+
+        // DOM elements
+        const rollNumberInput = document.getElementById('rollNumberInput');
+        const laptopIpInput = document.getElementById('laptopIpInput');
+        const sendToLaptopBtn = document.getElementById('sendToLaptopBtn');
+        const directFileInput = document.getElementById('directFileInput');
+        const simpleFileInput = document.getElementById('simpleFileInput');
+        const uploadStatus = document.getElementById('uploadStatus');
+        const memoryIndicator = document.getElementById('memoryIndicator');
+        const memoryUsage = document.getElementById('memoryUsage');
+
+        // Initialize Vanta.js background (lightweight)
+        document.addEventListener('DOMContentLoaded', function() {
+            // Simplified Vanta for less memory
+            if (window.VANTA) {
+                window.VANTA.NET({
+                    el: "#vanta-bg",
+                    mouseControls: false,  // Disable for memory
+                    touchControls: false,  // Disable for memory
+                    gyroControls: false,
+                    minHeight: 200.00,
+                    minWidth: 200.00,
+                    scale: 0.5,  // Smaller scale
+                    scaleMobile: 0.5,
+                    color: 0x0284c7,
+                    backgroundColor: 0xf8fafc,
+                    points: 5,  // Fewer points
+                    maxDistance: 15,
+                    spacing: 20,
+                    showDots: false  // Disable dots for memory
+                });
+            }
+            
+            // Start lightweight memory monitoring
+            startLightMemoryMonitoring();
+        });
+
+        // Lightweight memory monitoring
+        function startLightMemoryMonitoring() {
+            // Show memory indicator if available
+            if ('memory' in performance) {
+                memoryIndicator.style.display = 'block';
+                
+                memoryMonitorInterval = setInterval(() => {
+                    const memoryInfo = performance.memory;
+                    const usage = Math.round((memoryInfo.usedJSHeapSize / memoryInfo.jsHeapSizeLimit) * 100);
+                    memoryUsage.textContent = usage;
+                    
+                    // Change color based on usage
+                    if (usage > 80) {
+                        memoryIndicator.style.background = 'rgba(239, 68, 68, 0.1)';
+                        memoryIndicator.style.color = 'var(--error)';
+                        forceCleanup();
+                    } else if (usage > 60) {
+                        memoryIndicator.style.background = 'rgba(245, 158, 11, 0.1)';
+                        memoryIndicator.style.color = 'var(--warning)';
+                    } else {
+                        memoryIndicator.style.background = 'rgba(2, 132, 199, 0.1)';
+                        memoryIndicator.style.color = 'var(--accent)';
+                    }
+                }, 2000);
+            }
+        }
+
+        // Force cleanup function
+        function forceCleanup() {
+            // Clear file references
+            if (currentFile) {
+                currentFile = null;
+            }
+            
+            // Clear any pending uploads
+            sendToLaptopBtn.disabled = false;
+            updateStatus('Memory cleaned up', 'ready');
+            
+            // Force garbage collection if available
+            if (window.gc) {
+                window.gc();
+            }
+        }
+
+        // Direct file handler - NO PREVIEW (minimal memory)
+        function handleDirectFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            // Strict file size limit (2MB for mobile)
+            if (file.size > 2 * 1024 * 1024) {
+                updateStatus('File too large. Max 2MB for mobile.', 'error');
+                event.target.value = '';
+                return;
+            }
+            
+            // Store file reference directly (no reading)
+            currentFile = file;
+            
+            // Clear any existing preview to save memory
+            const preview = document.getElementById('capturedPreview');
+            if (preview) {
+                preview.style.display = 'none';
+                preview.src = '';
+            }
+            
+            checkFormState();
+            updateStatus(`File selected: ${file.name}`, 'ready');
+            
+            // Clear other input
+            simpleFileInput.value = '';
+        }
+
+        // Simple file handler
+        function handleSimpleFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            if (file.size > 2 * 1024 * 1024) {
+                updateStatus('File too large. Max 2MB for mobile.', 'error');
+                event.target.value = '';
+                return;
+            }
+            
+            currentFile = file;
+            
+            // Clear preview to save memory
+            const preview = document.getElementById('capturedPreview');
+            if (preview) {
+                preview.style.display = 'none';
+                preview.src = '';
+            }
+            
+            checkFormState();
+            updateStatus(`File selected: ${file.name}`, 'ready');
+            
+            // Clear other input
+            directFileInput.value = '';
+        }
+
+        function checkFormState() {
+            currentRollNumber = rollNumberInput.value.trim();
+            currentLaptopIp = laptopIpInput.value.trim();
+            
+            const hasRollNumber = currentRollNumber.length > 0;
+            const hasLaptopIp = currentLaptopIp.length > 0;
+            const hasFile = currentFile !== null;
+            
+            sendToLaptopBtn.disabled = !(hasRollNumber && hasLaptopIp && hasFile);
+        }
+
+        // Direct upload - NO PROCESSING (minimal memory)
+        async function sendToLaptop() {
+            if (!currentFile || !currentRollNumber || !currentLaptopIp) {
+                updateStatus('Please fill all fields and select file', 'error');
+                return;
+            }
+
+            sendToLaptopBtn.disabled = true;
+            updateStatus('Uploading...', 'uploading');
+
+            try {
+                // Create FormData with file directly (no reading/processing)
+                const formData = new FormData();
+                formData.append('file', currentFile, currentFile.name);
+                formData.append('roll_number', currentRollNumber);
+                formData.append('laptop_ip', currentLaptopIp);
+
+                // Upload directly
+                const uploadResponse = await fetch(`http://${currentLaptopIp}:5000/api/mobile_upload`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await uploadResponse.json();
+
+                if (result.success) {
+                    updateStatus('✅ Successfully sent!', 'ready');
+                    
+                    // Clear everything immediately
+                    currentFile = null;
+                    directFileInput.value = '';
+                    simpleFileInput.value = '';
+                    
+                    setTimeout(() => {
+                        resetForNext();
+                        forceCleanup();
+                    }, 1000);
+                } else {
+                    updateStatus(`❌ Error: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                console.error('Upload error:', error);
+                updateStatus('❌ Connection failed. Check IP.', 'error');
+            } finally {
+                sendToLaptopBtn.disabled = false;
+            }
+        }
+
+        function resetForNext() {
+            currentFile = null;
+            rollNumberInput.value = '';
+            
+            // Clear all inputs
+            directFileInput.value = '';
+            simpleFileInput.value = '';
+            
+            // Hide preview
+            const preview = document.getElementById('capturedPreview');
+            if (preview) {
+                preview.style.display = 'none';
+                preview.src = '';
+            }
+            
+            checkFormState();
+            updateStatus('Ready for next marksheet', 'ready');
+        }
+
+        function updateStatus(message, type) {
+            uploadStatus.textContent = message;
+            uploadStatus.className = `upload-status status-${type}`;
+        }
+
+        // Event listeners
+        rollNumberInput.addEventListener('input', checkFormState);
+        laptopIpInput.addEventListener('input', checkFormState);
+        directFileInput.addEventListener('change', handleDirectFile);
+        simpleFileInput.addEventListener('change', handleSimpleFile);
+        sendToLaptopBtn.addEventListener('click', sendToLaptop);
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (memoryMonitorInterval) {
+                clearInterval(memoryMonitorInterval);
+            }
+            currentFile = null;
+            forceCleanup();
+        });
+
+        // Memory pressure handling
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                forceCleanup();
+            }
+        });
+
+        // Add memory info button for debugging
+        if ('memory' in performance) {
+            const debugBtn = document.createElement('button');
+            debugBtn.textContent = '🧠 Memory Info';
+            debugBtn.style.cssText = 'position: fixed; top: 10px; right: 10px; background: rgba(0,0,0,0.7); color: white; border: none; padding: 5px 10px; border-radius: 5px; font-size: 12px; z-index: 1000;';
+            debugBtn.onclick = () => {
+                const memory = performance.memory;
+                alert(`Used: ${Math.round(memory.usedJSHeapSize / 1024 / 1024)}MB\nTotal: ${Math.round(memory.jsHeapSizeLimit / 1024 / 1024)}MB\nUsage: ${Math.round((memory.usedJSHeapSize / memory.jsHeapSizeLimit) * 100)}%`);
+            };
+            document.body.appendChild(debugBtn);
+        }
+    </script>
+</body>
+</html>
