@@ -7,6 +7,56 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r121/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/vanta@latest/dist/vanta.net.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        .pdf-card {
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 0.5rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+            text-align: center;
+        }
+        .pdf-card img {
+            width: 100%;
+            height: 140px;
+            object-fit: cover;
+            border-radius: 4px;
+            margin-bottom: 0.5rem;
+            transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            transform-origin: center center;
+            background: #f8fafc;
+        }
+        .pdf-card:hover img {
+            transform: scale(2.5);
+            z-index: 100;
+            position: relative;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.3);
+            border: 2px solid var(--accent);
+        }
+        .pdf-card:hover {
+            border-color: var(--accent);
+            box-shadow: 0 4px 12px rgba(2, 132, 199, 0.15);
+            z-index: 100;
+        }
+        .pdf-badge {
+            display: inline-block;
+            background: #f1f5f9;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            color: #475569;
+        }
+        .pdf-score {
+            font-size: 1.1rem;
+            font-weight: 800;
+            color: var(--accent);
+            margin-top: 0.25rem;
+        }
+    </style>
 </head>
 <body>
     <!-- Vanta.js Animated Background Container -->
@@ -18,7 +68,7 @@
         <!-- Header area with SVG Animation -->
         <header class="desk-header">
             <svg class="animated-logo" viewBox="0 0 600 120">
-                <text x="50%" y="50%">MarkSense AI</text>
+                <text x="50%" y="50%">AutoMarks</text>
             </svg>
             <p>Intelligence-Driven Automated Assessment</p>
         </header>
@@ -31,7 +81,14 @@
                     New Assessment Protocol
                 </h2>
                 
-                <div class="input-row">
+                <!-- Mode Toggle -->
+                <div class="mode-toggle-container" style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem; background: #f1f5f9; padding: 0.5rem; border-radius: 12px;">
+                    <button type="button" id="modeSingleBtn" class="btn-modern toggle-btn active" style="flex: 1; padding: 0.6rem; font-size: 0.95rem;">Single Image</button>
+                    <button type="button" id="modePdfBtn" class="btn-modern toggle-btn outline" style="flex: 1; padding: 0.6rem; font-size: 0.95rem; background: transparent; color: #64748b; border: 1px solid transparent; box-shadow: none;">Mass PDF Upload</button>
+                    <button type="button" id="modeWebcamBtn" class="btn-modern toggle-btn outline" style="flex: 1; padding: 0.6rem; font-size: 0.95rem; background: transparent; color: #64748b; border: 1px solid transparent; box-shadow: none;">📷 Webcam Scan</button>
+                </div>
+                
+                <div class="input-row" id="rollNumberContainer">
                     <label for="rollNumber">Student Identifier (Roll No)</label>
                     <input type="text" id="rollNumber" class="modern-input" placeholder="e.g. CS-2024-001" required>
                 </div>
@@ -39,16 +96,49 @@
                 <form id="uploadForm">
                     <!-- Clean Drop Zone -->
                     <div class="drop-zone" id="dropZone" tabindex="0">
-                        <div class="drop-icon">
+                        <div class="drop-icon" id="dropIconContainer">
                             <svg style="width: 32px; height: 32px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                                 <polyline points="17 8 12 3 7 8"></polyline>
                                 <line x1="12" y1="3" x2="12" y2="15"></line>
                             </svg>
                         </div>
-                        <h3 class="drop-title">Upload High-Res Document</h3>
-                        <p class="drop-desc">Drag & drop your scanned sheet here or click to browse files.</p>
-                        <input type="file" id="fileInput" accept=".png, .jpg, .jpeg" required>
+                        <h3 class="drop-title" id="dropTitle">Upload High-Res Document</h3>
+                        <p class="drop-desc" id="dropDesc">Drag & drop your scanned sheet here or click to browse files (.png, .jpg).</p>
+                        <input type="file" id="fileInput" accept=".png, .jpg, .jpeg">
+                    </div>
+
+                    <!-- Webcam Container -->
+                    <div id="webcamContainer" class="hidden">
+                        <div class="webcam-feed-wrapper">
+                            <video id="webcamVideo" autoplay playsinline muted></video>
+                            <canvas id="webcamCanvas" style="display:none;"></canvas>
+                            <div class="webcam-guide-overlay">
+                                <div class="webcam-guide-rect">
+                                    <div class="corner tl"></div>
+                                    <div class="corner tr"></div>
+                                    <div class="corner bl"></div>
+                                    <div class="corner br"></div>
+                                </div>
+                            </div>
+                            <div id="webcamStatus" class="webcam-status">Position marksheet within the guide</div>
+                            <div id="webcamFlash" class="webcam-flash"></div>
+                        </div>
+                        <div style="display: flex; gap: 0.75rem; margin-top: 1rem;">
+                            <button type="button" id="webcamCaptureBtn" class="btn-modern" style="flex: 1;">
+                                <svg style="width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="3"></circle></svg>
+                                Capture & Scan
+                            </button>
+                            <button type="button" id="webcamStopBtn" class="btn-modern outline" style="flex: 0 0 auto; padding: 0.6rem 1.2rem;">
+                                ✕ Stop
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div style="text-align: center; margin-top: 1rem;" id="mobileUploadContainer">
+                        <button type="button" id="mobileUploadBtn" class="btn-modern outline" style="width: 100%; border-style: dashed;" disabled>
+                            📱 Upload via Mobile Phone
+                        </button>
                     </div>
                     
                     <div style="margin-top: 2rem;">
@@ -63,14 +153,33 @@
                     <svg class="modern-spinner" viewBox="0 0 50 50">
                         <circle cx="25" cy="25" r="20"></circle>
                     </svg>
-                    <p style="font-weight: 500; color: var(--accent);">Processing neural extraction core...</p>
+                    <p style="font-weight: 500; color: var(--accent);" id="loadingText">Processing neural extraction core...</p>
+                </div>
+
+                <!-- Batch Results Grid Area -->
+                <div id="batchResultsGrid" class="hidden" style="margin-top: 2rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #e2e8f0; padding-top: 2rem; margin-bottom: 1.5rem;">
+                        <h3 class="card-title" style="margin: 0; font-size: 1.25rem;">
+                            Batch Processing Results
+                        </h3>
+                        <div>
+                            <button type="button" id="backToUploadBtn" class="btn-modern outline" style="padding: 0.5rem 1rem; font-size: 0.9rem; margin-right: 0.5rem;">New Scan</button>
+                            <button type="button" id="exportBatchExcelBtn" class="btn-modern btn-success" style="padding: 0.5rem 1rem; font-size: 0.9rem;">Download All (.xlsx)</button>
+                        </div>
+                    </div>
+                    <div id="pdfGridContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 1rem;">
+                        <!-- JS injected cards go here -->
+                    </div>
                 </div>
 
                 <!-- Editable Results Area -->
                 <div id="resultsArea" class="results-container hidden">
-                    <h3 class="card-title" style="font-size: 1.25rem; border-top: 1px solid #e2e8f0; padding-top: 2rem; margin-top: 2rem;">
-                        Extracted Data Matrix
-                    </h3>
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #e2e8f0; padding-top: 2rem; margin-top: 2rem;">
+                        <h3 class="card-title" style="margin: 0; font-size: 1.25rem;">
+                            Extracted Data Matrix
+                        </h3>
+                        <button type="button" id="backToGridBtn" class="btn-modern outline hidden" style="padding: 0.4rem 0.8rem; font-size: 0.85rem;">← Back to Grid</button>
+                    </div>
                     
                     <form id="updateForm">
                         <div id="marksGrid" class="marks-grid">
@@ -156,8 +265,29 @@
     </div>
 
     <!-- Frontend logic (LocalStorage + API interactions) preserved & adjusted for new IDs -->
+    <!-- QR Code Modal -->
+    <div id="qrModal" class="hidden" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 100; display: flex; justify-content: center; align-items: center; flex-direction: column; backdrop-filter: blur(5px);">
+        <div style="background: white; padding: 2rem; border-radius: 20px; text-align: center; max-width: 90%; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+            <h3 style="margin-top: 0; color: #1e293b; font-size: 1.5rem;">Scan & Upload</h3>
+            <p style="color: #64748b; margin-bottom: 1.5rem;">Scan this code with your phone camera to upload instantly.</p>
+            <div id="qrcode" style="display: flex; justify-content: center; align-items: center; margin-bottom: 1.5rem; background: white; padding: 10px; border-radius: 10px;"></div>
+            <div style="display: flex; align-items: center; justify-content: center; gap: 10px; color: #0284c7; font-weight: 500;">
+                <svg class="modern-spinner" viewBox="0 0 50 50" style="width: 20px; height: 20px; animation: rotate 2s linear infinite;">
+                    <circle cx="25" cy="25" r="15" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-dasharray="1, 200" stroke-dashoffset="0" style="animation: dash 1.5s ease-in-out infinite;"></circle>
+                </svg>
+                Waiting for phone upload...
+            </div>
+            <button id="closeQrModalBtn" class="btn-modern outline" style="margin-top: 1.5rem; width: 100%;">Cancel</button>
+        </div>
+    </div>
+    
     <script>
         const dropZone = document.getElementById('dropZone');
+        const mobileUploadBtn = document.getElementById('mobileUploadBtn');
+        const qrModal = document.getElementById('qrModal');
+        const closeQrModalBtn = document.getElementById('closeQrModalBtn');
+        let pollingInterval = null;
+        let qrCodeInstance = null;
         const fileInput = document.getElementById('fileInput');
         const rollNumberInput = document.getElementById('rollNumber');
         const processBtn = document.getElementById('processBtn');
@@ -174,14 +304,244 @@
         const exportBtn = document.getElementById('exportBtn');
         const scanHistoryList = document.getElementById('scanHistoryList');
         const toastContainer = document.getElementById('toast-container');
+        
+        const modeSingleBtn = document.getElementById('modeSingleBtn');
+        const modePdfBtn = document.getElementById('modePdfBtn');
+        const modeWebcamBtn = document.getElementById('modeWebcamBtn');
+        const rollNumberContainer = document.getElementById('rollNumberContainer');
+        const mobileUploadContainer = document.getElementById('mobileUploadContainer');
+        const dropTitle = document.getElementById('dropTitle');
+        const dropDesc = document.getElementById('dropDesc');
+        const loadingText = document.getElementById('loadingText');
+        const batchResultsGrid = document.getElementById('batchResultsGrid');
+        const pdfGridContainer = document.getElementById('pdfGridContainer');
+        const backToUploadBtn = document.getElementById('backToUploadBtn');
+        const exportBatchExcelBtn = document.getElementById('exportBatchExcelBtn');
+        const backToGridBtn = document.getElementById('backToGridBtn');
+        const webcamContainer = document.getElementById('webcamContainer');
+        const webcamVideo = document.getElementById('webcamVideo');
+        const webcamCanvas = document.getElementById('webcamCanvas');
+        const webcamCaptureBtn = document.getElementById('webcamCaptureBtn');
+        const webcamStopBtn = document.getElementById('webcamStopBtn');
+        const webcamStatus = document.getElementById('webcamStatus');
+        const webcamFlash = document.getElementById('webcamFlash');
+        let webcamStream = null;
+        
+        let currentMode = 'single';
+        let batchResults = [];
+        
+        function setActiveMode(activeBtn) {
+            [modeSingleBtn, modePdfBtn, modeWebcamBtn].forEach(btn => {
+                btn.classList.remove('active');
+                btn.classList.add('outline');
+                btn.style.color = '#64748b';
+                btn.style.borderColor = 'transparent';
+            });
+            activeBtn.classList.add('active');
+            activeBtn.classList.remove('outline');
+            activeBtn.style.color = '';
+            activeBtn.style.borderColor = '';
+        }
+
+        modeSingleBtn.addEventListener('click', () => {
+            currentMode = 'single';
+            setActiveMode(modeSingleBtn);
+            stopWebcam();
+            
+            rollNumberContainer.classList.remove('hidden');
+            mobileUploadContainer.classList.remove('hidden');
+            dropZone.classList.remove('hidden');
+            webcamContainer.classList.add('hidden');
+            fileInput.accept = ".png, .jpg, .jpeg";
+            dropTitle.textContent = "Upload High-Res Document";
+            dropDesc.textContent = "Drag & drop your scanned sheet here or click to browse files (.png, .jpg).";
+            checkFormState();
+        });
+
+        modePdfBtn.addEventListener('click', () => {
+            currentMode = 'pdf';
+            setActiveMode(modePdfBtn);
+            stopWebcam();
+            
+            rollNumberContainer.classList.add('hidden');
+            mobileUploadContainer.classList.add('hidden');
+            dropZone.classList.remove('hidden');
+            webcamContainer.classList.add('hidden');
+            fileInput.accept = ".pdf";
+            dropTitle.textContent = "Mass PDF Upload";
+            dropDesc.textContent = "Drag & drop your compiled scanned marksheets as a single PDF file.";
+            checkFormState();
+        });
+
+        modeWebcamBtn.addEventListener('click', () => {
+            currentMode = 'webcam';
+            setActiveMode(modeWebcamBtn);
+            
+            rollNumberContainer.classList.remove('hidden');
+            mobileUploadContainer.classList.add('hidden');
+            dropZone.classList.add('hidden');
+            webcamContainer.classList.remove('hidden');
+            startWebcam();
+            checkFormState();
+        });
 
         function checkFormState() {
-            if (rollNumberInput.value.trim() && fileInput.files.length > 0) {
-                processBtn.disabled = false;
+            if (currentMode === 'single') {
+                const hasRoll = rollNumberInput.value.trim() !== '';
+                if (hasRoll && fileInput.files.length > 0) {
+                    processBtn.disabled = false;
+                } else {
+                    processBtn.disabled = true;
+                }
+                if (mobileUploadBtn) {
+                    mobileUploadBtn.disabled = !hasRoll;
+                }
+            } else if (currentMode === 'webcam') {
+                processBtn.disabled = true; // Webcam uses its own capture button
             } else {
-                processBtn.disabled = true;
+                processBtn.disabled = !(fileInput.files.length > 0);
             }
         }
+
+        // ─── WEBCAM FUNCTIONS ─────────────────────────────────────────
+        async function startWebcam() {
+            try {
+                webcamStatus.textContent = 'Starting camera...';
+                webcamStatus.className = 'webcam-status';
+                const constraints = {
+                    video: {
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 },
+                        facingMode: 'environment'
+                    }
+                };
+                webcamStream = await navigator.mediaDevices.getUserMedia(constraints);
+                webcamVideo.srcObject = webcamStream;
+                webcamVideo.play();
+                webcamStatus.textContent = 'Position marksheet within the guide';
+            } catch (err) {
+                console.error('Webcam error:', err);
+                webcamStatus.textContent = '⚠ Camera access denied. Please allow camera permissions.';
+                webcamStatus.className = 'webcam-status error';
+                showToast('Failed to access webcam. Check browser permissions.', 'error');
+            }
+        }
+
+        function stopWebcam() {
+            if (webcamStream) {
+                webcamStream.getTracks().forEach(track => track.stop());
+                webcamStream = null;
+                webcamVideo.srcObject = null;
+            }
+        }
+
+        async function captureAndProcess() {
+            if (!webcamStream) return;
+            const rollNum = rollNumberInput.value.trim();
+            if (!rollNum) {
+                showToast('Enter a Roll Number before capturing.', 'error');
+                return;
+            }
+
+            // Flash animation
+            webcamFlash.classList.add('active');
+            setTimeout(() => webcamFlash.classList.remove('active'), 300);
+
+            // Capture frame to canvas
+            const video = webcamVideo;
+            webcamCanvas.width = video.videoWidth;
+            webcamCanvas.height = video.videoHeight;
+            const ctx = webcamCanvas.getContext('2d');
+            ctx.drawImage(video, 0, 0);
+
+            // Convert to base64 JPEG
+            const imageData = webcamCanvas.toDataURL('image/jpeg', 0.95);
+
+            // Show loading
+            webcamCaptureBtn.disabled = true;
+            webcamCaptureBtn.innerHTML = '<svg class="modern-spinner" viewBox="0 0 50 50" style="width:20px;height:20px;animation:spin 1s linear infinite;"><circle cx="25" cy="25" r="15" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-dasharray="1,200" stroke-dashoffset="0" style="animation:spinner-dash 1.5s ease-in-out infinite;"></circle></svg> Processing...';
+            webcamStatus.textContent = 'Analyzing marksheet...';
+            webcamStatus.className = 'webcam-status processing';
+
+            try {
+                const response = await fetch('/api/webcam_capture', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        image: imageData,
+                        roll_number: rollNum,
+                        session_id: 'default_session'
+                    })
+                });
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    showToast(`Acquired intelligence for Target ID: ${data.roll_number}`);
+                    currentUploadedData = data;
+
+                    // Populate marks grid
+                    marksGrid.innerHTML = '';
+                    data.results.forEach((item, idx) => {
+                        const markCard = document.createElement('div');
+                        markCard.className = 'mark-box';
+                        markCard.innerHTML = `
+                            <div class="q-label">${item.question}</div>
+                            <input type="number"
+                                class="editable-m-value"
+                                name="mark_${idx}"
+                                id="mark_${idx}"
+                                value="${item.mark}"
+                                step="any"
+                                onchange="recalculateTotal()"
+                                onkeyup="recalculateTotal()">
+                            <input type="hidden" name="question_${idx}" value="${item.question}">
+                        `;
+                        marksGrid.appendChild(markCard);
+                    });
+
+                    totalMarkValue.textContent = data.total;
+                    recalculateTotal();
+
+                    // Switch UI to results
+                    stopWebcam();
+                    webcamContainer.classList.add('hidden');
+                    sopCard.classList.add('hidden');
+                    rightPreviewContainer.classList.remove('hidden');
+                    resultsArea.classList.remove('hidden');
+                    addHistoryRecord(data.roll_number, data.total, data.results);
+
+                    if (data.debug_img) {
+                        imagePreview.src = `/download/default_session/${data.debug_img}`;
+                    }
+
+                    webcamStatus.textContent = 'Scan complete!';
+                    webcamStatus.className = 'webcam-status success';
+                } else {
+                    showToast(data.error || 'Processing failed.', 'error');
+                    webcamStatus.textContent = 'Processing failed. Try again.';
+                    webcamStatus.className = 'webcam-status error';
+                }
+            } catch (err) {
+                showToast('Connection failed.', 'error');
+                webcamStatus.textContent = 'Connection error. Try again.';
+                webcamStatus.className = 'webcam-status error';
+            } finally {
+                webcamCaptureBtn.disabled = false;
+                webcamCaptureBtn.innerHTML = '<svg style="width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="3"></circle></svg> Capture & Scan';
+            }
+        }
+
+        webcamCaptureBtn.addEventListener('click', captureAndProcess);
+        webcamStopBtn.addEventListener('click', () => {
+            stopWebcam();
+            webcamContainer.classList.add('hidden');
+            dropZone.classList.remove('hidden');
+            currentMode = 'single';
+            setActiveMode(modeSingleBtn);
+            rollNumberContainer.classList.remove('hidden');
+            mobileUploadContainer.classList.remove('hidden');
+            checkFormState();
+        });
 
         function showToast(message, type = 'success') {
             const toast = document.createElement('div');
@@ -271,14 +631,116 @@
 
         changeImageBtn.addEventListener('click', resetUpload);
 
+        mobileUploadBtn.addEventListener('click', async () => {
+            const rollNumber = rollNumberInput.value.trim();
+            if (!rollNumber) return;
+            
+            try {
+                // Get ngrok base URL
+                const response = await fetch('/api/get_ngrok_url');
+                const data = await response.json();
+                const baseUrl = data.url;
+                
+                const mobileUrl = `${baseUrl}/mobile?roll=${encodeURIComponent(rollNumber)}`;
+                
+                // Show modal
+                qrModal.classList.remove('hidden');
+                
+                // Generate QR Code
+                const qrContainer = document.getElementById('qrcode');
+                qrContainer.innerHTML = '';
+                qrCodeInstance = new QRCode(qrContainer, {
+                    text: mobileUrl,
+                    width: 200,
+                    height: 200,
+                    colorDark : "#0f172a",
+                    colorLight : "#ffffff",
+                    correctLevel : QRCode.CorrectLevel.H
+                });
+                
+                // Start polling
+                startPolling(rollNumber);
+            } catch (err) {
+                showToast("Failed to generate mobile upload link.", "error");
+            }
+        });
+
+        closeQrModalBtn.addEventListener('click', () => {
+            if (pollingInterval) clearInterval(pollingInterval);
+            qrModal.classList.add('hidden');
+        });
+
+        function startPolling(rollNumber) {
+            if (pollingInterval) clearInterval(pollingInterval);
+            
+            pollingInterval = setInterval(async () => {
+                try {
+                    const res = await fetch(`/api/check_mobile_upload/${encodeURIComponent(rollNumber)}`);
+                    const data = await res.json();
+                    
+                    if (data.success) {
+                        clearInterval(pollingInterval);
+                        qrModal.classList.add('hidden');
+                        
+                        showToast(`Acquired intelligence for Target ID: ${data.roll_number}`);
+                        currentUploadedData = data;
+                        marksGrid.innerHTML = '';
+                        
+                        data.results.forEach((item, idx) => {
+                            const markCard = document.createElement('div');
+                            markCard.className = 'mark-box';
+                            markCard.innerHTML = `
+                                <div class="q-label">${item.question}</div>
+                                <input type="number" 
+                                    class="editable-m-value" 
+                                    name="mark_${idx}" 
+                                    id="mark_${idx}" 
+                                    value="${item.mark}"
+                                    step="any"
+                                    onchange="recalculateTotal()"
+                                    onkeyup="recalculateTotal()">
+                                <input type="hidden" name="question_${idx}" value="${item.question}">
+                            `;
+                            marksGrid.appendChild(markCard);
+                        });
+                        
+                        totalMarkValue.textContent = data.total;
+                        recalculateTotal();
+                        
+                        // Switch UI layout to results
+                        dropZone.classList.add('hidden');
+                        sopCard.classList.add('hidden');
+                        rightPreviewContainer.classList.remove('hidden');
+                        document.querySelector('.desk-container').classList.add('layout-scanning');
+                        
+                        resultsArea.classList.remove('hidden');
+                        addHistoryRecord(data.roll_number, data.total, data.results);
+                        
+                        if (data.debug_img) {
+                            imagePreview.src = `/download/default_session/${data.debug_img}`;
+                        }
+                    }
+                } catch (err) {
+                    console.error("Polling error", err);
+                }
+            }, 2000);
+        }
+
         function resetUpload() {
             fileInput.value = '';
+            stopWebcam();
             document.querySelector('.desk-container').classList.remove('layout-scanning');
             document.body.classList.remove('scanning-mode');
             rightPreviewContainer.classList.add('hidden');
             sopCard.classList.remove('hidden');
             dropZone.classList.remove('hidden');
+            webcamContainer.classList.add('hidden');
             resultsArea.classList.add('hidden');
+            batchResultsGrid.classList.add('hidden');
+            currentMode = 'single';
+            setActiveMode(modeSingleBtn);
+            rollNumberContainer.classList.remove('hidden');
+            mobileUploadContainer.classList.remove('hidden');
             checkFormState();
         }
 
@@ -309,71 +771,240 @@
 
         uploadForm.addEventListener('submit', async (e) => {
             e.preventDefault();
-            if (!rollNumberInput.value || !fileInput.files[0]) return;
+            
+            if (currentMode === 'single') {
+                if (!rollNumberInput.value || !fileInput.files[0]) return;
 
-            const formData = new FormData();
-            formData.append('roll_number', rollNumberInput.value);
-            formData.append('file', fileInput.files[0]);
-            formData.append('session_id', 'default_session');
+                const formData = new FormData();
+                formData.append('roll_number', rollNumberInput.value);
+                formData.append('file', fileInput.files[0]);
+                formData.append('session_id', 'default_session');
 
-            // Trigger animations
-            document.querySelector('.desk-container').classList.add('layout-scanning');
-            document.body.classList.add('scanning-mode');
+                // Trigger animations
+                document.querySelector('.desk-container').classList.add('layout-scanning');
+                document.body.classList.add('scanning-mode');
 
-            loadingOverlay.classList.remove('hidden');
-            resultsArea.classList.add('hidden');
-            processBtn.disabled = true;
+                loadingOverlay.classList.remove('hidden');
+                resultsArea.classList.add('hidden');
+                batchResultsGrid.classList.add('hidden');
+                processBtn.disabled = true;
 
-            try {
-                const response = await fetch('/upload', {
-                    method: 'POST',
-                    headers: { 'Accept': 'application/json' },
-                    body: formData
-                });
-                const data = await response.json();
-                
-                if (response.ok && data.success) {
-                    showToast(`Acquired intelligence for Target ID: ${data.roll_number}`);
-                    currentUploadedData = data;
-                    marksGrid.innerHTML = '';
-                    
-                    data.results.forEach((item, idx) => {
-                        const markCard = document.createElement('div');
-                        markCard.className = 'mark-box';
-                        markCard.innerHTML = `
-                            <div class="q-label">${item.question}</div>
-                            <input type="number" 
-                                class="editable-m-value" 
-                                name="mark_${idx}" 
-                                id="mark_${idx}" 
-                                value="${item.mark}"
-                                step="any"
-                                onchange="recalculateTotal()"
-                                onkeyup="recalculateTotal()">
-                            <input type="hidden" name="question_${idx}" value="${item.question}">
-                        `;
-                        marksGrid.appendChild(markCard);
+                try {
+                    const response = await fetch('/upload', {
+                        method: 'POST',
+                        headers: { 'Accept': 'application/json' },
+                        body: formData
                     });
+                    const data = await response.json();
                     
-                    totalMarkValue.textContent = data.total;
-                    recalculateTotal();
-                    resultsArea.classList.remove('hidden');
-                    addHistoryRecord(data.roll_number, data.total, data.results);
-                    
-                    if (data.debug_img) {
-                        imagePreview.src = `/download/default_session/${data.debug_img}`;
+                    if (response.ok && data.success) {
+                        showToast(`Acquired intelligence for Target ID: ${data.roll_number}`);
+                        currentUploadedData = data;
+                        marksGrid.innerHTML = '';
+                        
+                        data.results.forEach((item, idx) => {
+                            const markCard = document.createElement('div');
+                            markCard.className = 'mark-box';
+                            markCard.innerHTML = `
+                                <div class="q-label">${item.question}</div>
+                                <input type="number" 
+                                    class="editable-m-value" 
+                                    name="mark_${idx}" 
+                                    id="mark_${idx}" 
+                                    value="${item.mark}"
+                                    step="any"
+                                    onchange="recalculateTotal()"
+                                    onkeyup="recalculateTotal()">
+                                <input type="hidden" name="question_${idx}" value="${item.question}">
+                            `;
+                            marksGrid.appendChild(markCard);
+                        });
+                        
+                        totalMarkValue.textContent = data.total;
+                        recalculateTotal();
+                        resultsArea.classList.remove('hidden');
+                        addHistoryRecord(data.roll_number, data.total, data.results);
+                        
+                        if (data.debug_img) {
+                            imagePreview.src = `/download/default_session/${data.debug_img}`;
+                        }
+                    } else {
+                        showToast(data.error || "Unknown telemetry error during processing.", 'error');
+                        resetUpload();
                     }
-                } else {
-                    showToast(data.error || "Unknown telemetry error during processing.", 'error');
+                } catch (err) {
+                    showToast("Connection to the AI Core failed. Is the cluster active?", 'error');
                     resetUpload();
+                } finally {
+                    loadingOverlay.classList.add('hidden');
+                    document.querySelector('.desk-container').classList.remove('layout-scanning');
+                    document.body.classList.remove('scanning-mode');
                 }
+            } else {
+                // PDF BATCH UPLOAD LOGIC
+                if (!fileInput.files[0]) return;
+                
+                const formData = new FormData();
+                formData.append('file', fileInput.files[0]);
+                formData.append('session_id', 'default_session');
+                
+                document.querySelector('.desk-container').classList.add('layout-scanning');
+                document.body.classList.add('scanning-mode');
+                loadingText.textContent = "Processing Mass PDF constraints. This may take longer...";
+                loadingOverlay.classList.remove('hidden');
+                resultsArea.classList.add('hidden');
+                batchResultsGrid.classList.add('hidden');
+                processBtn.disabled = true;
+                
+                try {
+                    const response = await fetch('/upload_pdf', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const data = await response.json();
+                    
+                    if (response.ok && data.success) {
+                        showToast(`Intelligence acquired for ${data.total_processed} items.`);
+                        batchResults = data.batch_results;
+                        
+                        // Push all batch to history
+                        batchResults.forEach(r => addHistoryRecord(r.roll_number, r.total, r.results));
+                        
+                        renderBatchGrid();
+                    } else {
+                        showToast(data.error || "Unknown telemetry error during PDF processing.", 'error');
+                        resetUpload();
+                    }
+                } catch (err) {
+                    showToast("Connection to the AI Core failed.", 'error');
+                    resetUpload();
+                } finally {
+                    loadingOverlay.classList.add('hidden');
+                    loadingText.textContent = "Processing neural extraction core...";
+                    document.querySelector('.desk-container').classList.remove('layout-scanning');
+                    document.body.classList.remove('scanning-mode');
+                }
+            }
+        });
+
+        function renderBatchGrid() {
+            dropZone.classList.add('hidden');
+            sopCard.classList.add('hidden');
+            rightPreviewContainer.classList.add('hidden'); // Ensure right preview is hidden so grid can breathe or stay centered
+            resultsArea.classList.add('hidden');
+            batchResultsGrid.classList.remove('hidden');
+            pdfGridContainer.innerHTML = '';
+            
+            batchResults.forEach((item, index) => {
+                const card = document.createElement('div');
+                card.className = 'pdf-card';
+                card.innerHTML = `
+                    <div class="pdf-badge">Roll ${item.roll_number}</div>
+                    <img src="/download/default_session/${item.debug_img}" alt="Marksheet preview">
+                    <div class="pdf-score">Total: ${item.total}</div>
+                `;
+                card.onclick = () => openSingleEditorFromBatch(index);
+                pdfGridContainer.appendChild(card);
+            });
+        }
+        
+        function openSingleEditorFromBatch(index) {
+            batchResultsGrid.classList.add('hidden');
+            resultsArea.classList.remove('hidden');
+            backToGridBtn.classList.remove('hidden');
+            
+            const data = batchResults[index];
+            currentUploadedData = data;
+            
+            marksGrid.innerHTML = '';
+            data.results.forEach((item, idx) => {
+                const markCard = document.createElement('div');
+                markCard.className = 'mark-box';
+                markCard.innerHTML = `
+                    <div class="q-label">${item.question}</div>
+                    <input type="number" 
+                        class="editable-m-value" 
+                        name="mark_${idx}" 
+                        id="mark_${idx}" 
+                        value="${item.mark}"
+                        step="any"
+                        onchange="recalculateTotal()"
+                        onkeyup="recalculateTotal()">
+                    <input type="hidden" name="question_${idx}" value="${item.question}">
+                `;
+                marksGrid.appendChild(markCard);
+            });
+            
+            totalMarkValue.textContent = data.total;
+            recalculateTotal();
+            if (data.debug_img) {
+                imagePreview.src = `/download/default_session/${data.debug_img}`;
+                rightPreviewContainer.classList.remove('hidden');
+            }
+        }
+        
+        backToGridBtn.addEventListener('click', () => {
+            resultsArea.classList.add('hidden');
+            rightPreviewContainer.classList.add('hidden');
+            backToGridBtn.classList.add('hidden');
+            
+            if (currentUploadedData) {
+                const updatedTotal = totalMarkValue.textContent;
+                const idx = batchResults.findIndex(r => r.roll_number === currentUploadedData.roll_number);
+                if (idx !== -1) {
+                    batchResults[idx].total = updatedTotal;
+                    batchResults[idx].results = getGridResults();
+                }
+            }
+            renderBatchGrid();
+        });
+        
+        backToUploadBtn.addEventListener('click', () => {
+            batchResultsGrid.classList.add('hidden');
+            resetUpload();
+        });
+        
+        exportBatchExcelBtn.addEventListener('click', async () => {
+            showToast("Generating comprehensive Excel batch file...");
+            exportBatchExcelBtn.innerHTML = "Downloading...";
+            exportBatchExcelBtn.disabled = true;
+            
+            const sessionHistory = JSON.parse(sessionStorage.getItem('marksense_history')) || [];
+            if(sessionHistory.length === 0) {
+                showToast("No history found to export", "error");
+                exportBatchExcelBtn.innerHTML = "Download All (.xlsx)";
+                exportBatchExcelBtn.disabled = false;
+                return;
+            }
+            
+            const payload = {
+                session_id: 'default_session',
+                session_history: sessionHistory
+            };
+            
+            try {
+                const response = await fetch('/export_all_session', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!response.ok) throw new Error("Export failed");
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `marks_batch_complete.xlsx`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+                showToast("Batch Session exported!");
             } catch (err) {
-                showToast("Connection to the AI Core failed. Is the cluster active?", 'error');
-                resetUpload();
+                showToast("Failed to generate combined export file.", 'error');
             } finally {
-                loadingOverlay.classList.add('hidden');
-                document.querySelector('.desk-container').classList.remove('layout-scanning');
-                document.body.classList.remove('scanning-mode');
+                exportBatchExcelBtn.innerHTML = "Download All (.xlsx)";
+                exportBatchExcelBtn.disabled = false;
             }
         });
 
