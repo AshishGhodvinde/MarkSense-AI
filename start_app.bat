@@ -15,7 +15,7 @@ if exist ".venv\Scripts\activate.bat" (
 )
 
 echo Starting MarkSense AI...
-python app.py
+".venv\Scripts\python.exe" app.py
 
 if errorlevel 1 (
     echo.

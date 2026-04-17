@@ -8,6 +8,7 @@ import numpy as np  # type: ignore
 import pandas as pd  # type: ignore
 import torch  # type: ignore
 from PIL import Image  # type: ignore
+from PIL import ImageOps  # type: ignore
 from torchvision import transforms  # type: ignore
 
 from train import MnistCNN  # type: ignore
@@ -174,6 +175,52 @@ def locate_marksheet(img: np.ndarray) -> np.ndarray:
     cropped = img[y : y + h, x : x + w]
     return cv2.resize(cropped, (CANONICAL_WIDTH, CANONICAL_HEIGHT))
 
+
+def load_image_bgr(path: str) -> Optional[np.ndarray]:
+    """
+    Load an image while respecting EXIF orientation (phone photos).
+    OpenCV's cv2.imread ignores EXIF, which makes "straight" images appear rotated/tilted.
+    """
+    try:
+        pil = Image.open(path)
+        pil = ImageOps.exif_transpose(pil)
+        rgb = np.array(pil.convert("RGB"))
+        return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+    except Exception:
+        img = cv2.imread(path)
+        return img
+
+
+def refine_alignment(img: np.ndarray) -> np.ndarray:
+    """
+    After perspective normalization, do a small additional deskew.
+    This prevents the debug overlay from looking slightly tilted.
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 40, 140, apertureSize=3)
+    lines = cv2.HoughLinesP(edges, 1, np.pi / 180, 90, minLineLength=120, maxLineGap=12)
+    if lines is None:
+        return img
+
+    angles: List[float] = []
+    for line in lines:
+        x1, y1, x2, y2 = line[0]
+        angle = float(np.degrees(np.arctan2(y2 - y1, x2 - x1)))
+        if abs(angle) < 8:
+            angles.append(angle)
+    if not angles:
+        return img
+
+    median_angle = float(np.median(angles))
+    # Clamp: we only want to correct small residual skew, not rotate aggressively.
+    if abs(median_angle) < 0.25:
+        return img
+    median_angle = float(max(-3.0, min(3.0, median_angle)))
+
+    h, w = img.shape[:2]
+    center = (w // 2, h // 2)
+    matrix = cv2.getRotationMatrix2D(center, median_angle, 1.0)
+    return cv2.warpAffine(img, matrix, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
 
 def _bbox_centroid(bbox) -> Tuple[float, float]:
     xs = [float(p[0]) for p in bbox]
@@ -354,6 +401,55 @@ def _pick_obt_column_bounds(
     return int(img_width * 0.72), int(img_width * 0.98)
 
 
+def _table_vertical_lines(binary: np.ndarray, y1: int, y2: int) -> List[int]:
+    """
+    Detect vertical grid lines inside the marks table.
+
+    Global projection-based detection often only returns the outer border lines, because inner
+    grid lines do not span the full image height. This ROI-based contour approach is more stable.
+    """
+    h, w = binary.shape[:2]
+    y1 = max(0, int(y1))
+    y2 = min(h, int(y2))
+    if y2 - y1 < 50:
+        return []
+
+    roi = binary[y1:y2, :]
+    roi_h = roi.shape[0]
+
+    xs: List[int] = []
+
+    # 1) Morphology-based extraction (fast when lines are continuous).
+    kernel_h = max(int(roi_h * 0.45), 120)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, kernel_h))
+    line_img = cv2.morphologyEx(roi, cv2.MORPH_OPEN, kernel, iterations=1)
+
+    contours, _ = cv2.findContours(line_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    for c in contours:
+        x, y, cw, ch = cv2.boundingRect(c)
+        if ch < int(roi_h * 0.28):
+            continue
+        if cw > max(18, int(w * 0.03)):
+            continue
+        xs.append(int(x + cw / 2))
+
+    xs = _merge_close_positions(xs, gap=12)
+
+    # 2) Hough fallback (handles broken/dashed lines due to thresholding/shadows).
+    if len(xs) < 4:
+        edges = cv2.Canny(roi, 40, 140, apertureSize=3)
+        min_len = max(int(roi_h * 0.25), 120)
+        lines = cv2.HoughLinesP(edges, 1, np.pi / 180, 110, minLineLength=min_len, maxLineGap=18)
+        if lines is not None:
+            for line in lines:
+                x1p, y1p, x2p, y2p = (int(v) for v in line[0])
+                if abs(x2p - x1p) <= 8 and abs(y2p - y1p) >= int(roi_h * 0.22):
+                    xs.append(int((x1p + x2p) / 2))
+        xs = _merge_close_positions(xs, gap=12)
+
+    return xs
+
+
 def _roi_horizontal_lines(binary: np.ndarray, x1: int, x2: int) -> List[int]:
     roi = binary[:, max(0, x1) : min(binary.shape[1], x2)]
     if roi.size == 0:
@@ -408,22 +504,42 @@ def _derive_obt_row_boundaries_from_roi(
     total_y_top: Optional[float],
 ) -> Optional[List[int]]:
     img_h = binary.shape[0]
-    y_start = int((obt_y_bottom or (img_h * 0.06)) + 4)
-    y_stop = int((total_y_top or (img_h * 0.72)) - 4)
-    if y_stop <= y_start:
-        return None
-
     # Detect horizontal separators within the Obt column ROI.
-    roi_lines = _roi_horizontal_lines(binary, obt_left, obt_right)
-    roi_lines = [y for y in roi_lines if y_start <= y <= y_stop]
+    # This must be independent of handwriting; empty cells must still occupy their row.
+    roi_lines_all = sorted(set(_roi_horizontal_lines(binary, obt_left, obt_right)))
+    if len(roi_lines_all) < 11:
+        roi_lines_all = sorted(set(_merge_close_positions(_get_line_positions(binary, "horizontal"), gap=10)))
+
+    # Anchor using the printed "Obt." header position: choose the first grid line below it.
+    # If OCR drifts, we still snap to the next real horizontal separator line to avoid row shifting.
+    anchor_y = float(obt_y_bottom) if obt_y_bottom is not None else float(img_h * 0.06)
+    top_line_candidates = [y for y in roi_lines_all if y >= int(anchor_y + 2)]
+    if not top_line_candidates:
+        return _best_11_line_sequence(roi_lines_all)
+    top_line = int(min(top_line_candidates))
+
+    # Stop above the "Total" row by snapping to the last separator above the "Total" text.
+    stop_y = float(total_y_top) if total_y_top is not None else float(img_h * 0.72)
+    y_stop = int(stop_y - 2)
+    if y_stop <= top_line:
+        y_stop = int(img_h * 0.72)
+
+    roi_lines = [y for y in roi_lines_all if top_line <= y <= y_stop]
     roi_lines = sorted(set(roi_lines))
+
+    after = [y for y in roi_lines if y >= top_line]
+    if len(after) >= 11:
+        return after[:11]
 
     seq = _best_11_line_sequence(roi_lines)
     if seq is None:
         # Fallback to global line detection if ROI detection is weak.
-        global_lines = _get_line_positions(binary, "horizontal")
-        global_lines = [y for y in global_lines if y_start <= y <= y_stop]
-        global_lines = _merge_close_positions(global_lines, gap=10)
+        global_lines = _merge_close_positions(_get_line_positions(binary, "horizontal"), gap=10)
+        global_lines = sorted(set(global_lines))
+        global_lines = [y for y in global_lines if top_line <= y <= y_stop]
+        after_g = [y for y in global_lines if y >= top_line]
+        if len(after_g) >= 11:
+            return after_g[:11]
         seq = _best_11_line_sequence(global_lines)
     return seq
 
@@ -434,35 +550,40 @@ def detect_obt_cells(img: np.ndarray, is_webcam: bool = False) -> Optional[List[
     Returns list of 10 rectangles: (x1, y1, x2, y2) in image coordinates.
     """
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    if is_webcam:
-        binary = cv2.adaptiveThreshold(
-            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 31, 10
-        )
-    else:
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
-
-    # Vertical lines from full image (more stable for column bounds).
-    v_lines = _get_line_positions(binary, "vertical")
+    # For grid-line detection, adaptive threshold is much more robust than Otsu
+    # (Otsu often keeps only the outer border on phone scans).
+    block = 31 if not is_webcam else 31
+    c = 9 if not is_webcam else 10
+    binary = cv2.adaptiveThreshold(
+        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block, c
+    )
 
     obt_x_center, obt_y_bottom, total_y_top = _ocr_find_obt_and_total_anchors(img)
+
+    # Vertical lines inside the table region (captures inner grid lines, not just the outer border).
+    y2_table = int((total_y_top or (img.shape[0] * 0.74)) + 40)
+    v_lines = _table_vertical_lines(binary, y1=int(img.shape[0] * 0.02), y2=y2_table)
+    if len(v_lines) < 4:
+        v_lines = _get_line_positions(binary, "vertical")
 
     obt_left, obt_right = _pick_obt_column_bounds(v_lines, obt_x_center, img.shape[1])
     row_lines = _derive_obt_row_boundaries_from_roi(binary, obt_left, obt_right, obt_y_bottom, total_y_top)
     if row_lines is None or len(row_lines) != 11:
         return None
 
-    # Add small in-cell padding to avoid the grid lines, but keep it tight so we don't crop off digits.
-    pad_x = max(3, int((obt_right - obt_left) * 0.02))
+    # Keep padding minimal: cells are separated by a single line and handwriting often touches it.
+    pad_x = max(1, int((obt_right - obt_left) * 0.01))
 
     rects: List[Tuple[int, int, int, int]] = []
     for i in range(10):
         y_top = int(row_lines[i])
         y_bottom = int(row_lines[i + 1])
         cell_h = max(1, y_bottom - y_top)
-        pad_y = max(2, int(cell_h * 0.12))
+        pad_y = 1
 
         x1 = max(0, obt_left + pad_x)
         x2 = min(img.shape[1], obt_right - pad_x)
+        # Almost flush with the row lines; our digit mask remover handles grid lines later.
         y1 = max(0, y_top + pad_y)
         y2 = min(img.shape[0], y_bottom - pad_y)
         if x2 <= x1 or y2 <= y1:
@@ -525,12 +646,30 @@ def is_likely_dash(crop_img: np.ndarray) -> bool:
     return h < 8 or (w > 2.2 * h and h < crop_img.shape[0] * 0.35)
 
 
+def is_empty_cell(crop_img: np.ndarray) -> bool:
+    """
+    Detect truly empty cells (no handwriting) without confusing thin digits like '1' as "empty".
+    We focus on the right half because marks are usually written like "02", "01", "5", etc.
+    """
+    if crop_img.size == 0:
+        return True
+
+    # Delegate to a stricter presence detector that ignores most background noise.
+    return not _has_confident_mark_presence(crop_img)
+
+
 def _prepare_digit_mask(crop_img: np.ndarray) -> np.ndarray:
     gray = cv2.cvtColor(crop_img, cv2.COLOR_BGR2GRAY) if len(crop_img.shape) == 3 else crop_img.copy()
     gray = cv2.GaussianBlur(gray, (3, 3), 0)
-    thresh = cv2.adaptiveThreshold(
-        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 21, 9
-    )
+
+    # Illumination normalization (phone shadows): estimate background and emphasize dark ink.
+    h0, w0 = gray.shape[:2]
+    k = max(15, (min(h0, w0) // 6) | 1)  # odd kernel, proportional to crop size
+    bg_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+    background = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, bg_kernel, iterations=1)
+    diff = cv2.subtract(background, gray)  # handwriting becomes bright
+    norm = cv2.normalize(diff, None, 0, 255, cv2.NORM_MINMAX)
+    _, thresh = cv2.threshold(norm, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
 
     h, w = thresh.shape
     horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(w // 2, 20), 1))
@@ -539,12 +678,15 @@ def _prepare_digit_mask(crop_img: np.ndarray) -> np.ndarray:
     vertical_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, vertical_kernel, iterations=1)
     clean = cv2.subtract(thresh, horizontal_lines)
     clean = cv2.subtract(clean, vertical_lines)
+    # Avoid aggressive dilation: it turns background speckles into "fake digits" and causes false positives.
+    clean = cv2.medianBlur(clean, 3)
     clean = cv2.morphologyEx(clean, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8), iterations=1)
-    clean = cv2.dilate(clean, np.ones((2, 2), np.uint8), iterations=1)
+    clean = cv2.morphologyEx(clean, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8), iterations=1)
 
     # Remove residual cell borders at the crop edges so grid lines do not become "digits".
-    edge_y = max(2, int(h * 0.16))
-    edge_x = max(2, int(w * 0.04))
+    # Keep this conservative; marks often touch the borders (especially '1').
+    edge_y = max(1, int(h * 0.08))
+    edge_x = max(1, int(w * 0.02))
     clean[:edge_y, :] = 0
     clean[h - edge_y :, :] = 0
     clean[:, :edge_x] = 0
@@ -560,9 +702,24 @@ def clean_crop_for_ocr(crop_img: np.ndarray) -> np.ndarray:
 
 
 def preprocess_for_mnist(crop_img: np.ndarray) -> np.ndarray:
-    mask = _prepare_digit_mask(crop_img)
+    # If we're already given a binary-ish component (e.g., from segmentation),
+    # don't re-threshold it; _prepare_digit_mask is tuned for full cell crops and
+    # can wipe out thin strokes like '1' when applied twice.
+    if len(crop_img.shape) == 3:
+        gray = cv2.cvtColor(crop_img, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = crop_img.copy()
+
+    unique = np.unique(gray)
+    if unique.size <= 6 and int(gray.max()) >= 200 and int(gray.min()) <= 10:
+        mask = (gray > 0).astype(np.uint8) * 255
+        # Slightly thicken very thin strokes so they survive resizing.
+        mask = cv2.dilate(mask, np.ones((2, 2), np.uint8), iterations=1)
+    else:
+        mask = _prepare_digit_mask(crop_img)
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    valid = [contour for contour in contours if cv2.contourArea(contour) > 20]
+    # Lower threshold so thin '1' strokes aren't discarded.
+    valid = [contour for contour in contours if cv2.contourArea(contour) > 8]
     if not valid:
         return np.zeros((28, 28), dtype=np.uint8)
 
@@ -638,6 +795,28 @@ def predict_mark_template(crop_img: np.ndarray) -> Tuple[Optional[str], float]:
     return best_label, best_score
 
 
+def predict_mark_template_restricted(crop_img: np.ndarray, allowed: Sequence[str]) -> Tuple[Optional[str], float]:
+    allowed_set = set(str(a) for a in allowed)
+    if not digit_templates or not allowed_set:
+        return None, 0.0
+
+    processed = preprocess_for_mnist(crop_img)
+    vector = _build_template_vector(processed)
+    if vector is None:
+        return None, 0.0
+
+    best_label = None
+    best_score = -1.0
+    for label, template_vector in digit_templates:
+        if label not in allowed_set:
+            continue
+        score = float(np.dot(vector, template_vector))
+        if score > best_score:
+            best_label = label
+            best_score = score
+    return best_label, best_score
+
+
 load_digit_templates()
 
 
@@ -653,6 +832,30 @@ def predict_mark_cnn(crop_img: np.ndarray) -> Tuple[str, float]:
         top_prob, top_pred = torch.max(probabilities, dim=1)
 
     return str(int(top_pred.item())), float(top_prob.item())
+
+
+def predict_mark_cnn_restricted(crop_img: np.ndarray, allowed: Sequence[str]) -> Tuple[str, float]:
+    allowed_digits = [int(a) for a in allowed if str(a).isdigit()]
+    if not allowed_digits:
+        return "-", 0.0
+
+    processed = preprocess_for_mnist(crop_img)
+    if np.sum(processed) == 0:
+        return "-", 0.0
+
+    tensor = mnist_transform(Image.fromarray(processed)).unsqueeze(0).to(device)
+    with torch.no_grad():
+        outputs = mnist_model(tensor)
+        probabilities = torch.nn.functional.softmax(outputs, dim=1).squeeze(0)
+
+    best_d = allowed_digits[0]
+    best_p = float(probabilities[best_d].item())
+    for d in allowed_digits[1:]:
+        p = float(probabilities[d].item())
+        if p > best_p:
+            best_d = d
+            best_p = p
+    return str(int(best_d)), float(best_p)
 
 
 def _normalize_ocr_text(text: str) -> str:
@@ -741,7 +944,8 @@ def _segment_digit_images(crop_img: np.ndarray) -> List[np.ndarray]:
     for contour in contours:
         x, y, w, h = cv2.boundingRect(contour)
         area = cv2.contourArea(contour)
-        if area < 20 or h < 10 or w < 3:
+        # Allow very thin '1' strokes (w=1-2).
+        if area < 14 or h < 10 or w < 1:
             continue
         boxes.append((x, y, w, h))
 
@@ -763,22 +967,28 @@ def _extract_right_digit_crop(crop_img: np.ndarray) -> Optional[np.ndarray]:
 
     candidate_boxes = []
     width = mask.shape[1]
+    min_h = max(10, int(mask.shape[0] * 0.30))
     for contour in contours:
         x, y, w, h = cv2.boundingRect(contour)
         area = cv2.contourArea(contour)
-        if area < 55 or h < 14 or w < 5:
+        # Tolerant for thin '1' and faint strokes (phone photos).
+        if h < min_h or w < 1 or area < 10:
             continue
-        if x + w / 2 < width * 0.52:
+        if x + w / 2 < width * 0.45:
             continue
         candidate_boxes.append((x, y, w, h))
 
     if not candidate_boxes:
         return None
 
-    rightmost_x = max(x + w for x, y, w, h in candidate_boxes)
+    # Pick the rightmost digit component and only group very nearby fragments
+    # (to avoid accidentally including the leading "0" in "02"/"01").
+    rx, ry, rw, rh = max(candidate_boxes, key=lambda b: b[0] + b[2] / 2.0)
+    right_center = float(rx + rw / 2.0)
     grouped = []
     for x, y, w, h in candidate_boxes:
-        if rightmost_x - (x + w) <= width * 0.16:
+        center = float(x + w / 2.0)
+        if abs(center - right_center) <= width * 0.10:
             grouped.append((x, y, w, h))
 
     x1 = min(x for x, y, w, h in grouped)
@@ -792,7 +1002,7 @@ def _extract_right_digit_crop(crop_img: np.ndarray) -> Optional[np.ndarray]:
     x2 = min(mask.shape[1], x2 + pad)
     y2 = min(mask.shape[0], y2 + pad)
     digit_mask = mask[y1:y2, x1:x2]
-    if digit_mask.size == 0 or np.count_nonzero(digit_mask) < 40:
+    if digit_mask.size == 0 or np.count_nonzero(digit_mask) < 25:
         return None
     if digit_mask.shape[0] < 16 or digit_mask.shape[1] < 8:
         return None
@@ -819,21 +1029,47 @@ def _has_leading_zero_component(crop_img: np.ndarray) -> bool:
 def _has_confident_mark_presence(crop_img: np.ndarray) -> bool:
     mask = _prepare_digit_mask(crop_img)
     h, w = mask.shape
-    right_half = mask[:, int(w * 0.48) :]
-    right_ink_ratio = float(np.count_nonzero(right_half)) / float(max(right_half.size, 1))
-    if right_ink_ratio < 0.012:
+    if mask.size == 0:
         return False
 
-    contours, _ = cv2.findContours(right_half, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Focus on the right side; this avoids treating a leading "0" in "02" as the actual mark.
+    right_half = mask[:, int(w * 0.42) :]
+    right_ink_ratio = float(np.count_nonzero(right_half)) / float(max(right_half.size, 1))
+    if right_ink_ratio < 0.004:
+        return False
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return False
+
+    min_ch = max(12, int(h * 0.22))
     for contour in contours:
         x, y, cw, ch = cv2.boundingRect(contour)
-        area = cv2.contourArea(contour)
-        if area >= 70 and ch >= 16 and cw >= 6:
+        area = float(cv2.contourArea(contour))
+
+        # Ignore left-side blobs (usually the leading "0" or leftover artifacts).
+        if x + cw / 2 < w * 0.40:
+            continue
+
+        # Digit-ish vertical extent. Marks are often not full-height in the cell.
+        if ch < min_ch:
+            continue
+
+        if cw < 1:
+            continue
+
+        # Strong enough ink blob.
+        if area >= 55:
             return True
+
+        # Thin stroke / faint digit.
+        if area >= 14 and (ch >= int(h * 0.30) or cw >= 2):
+            return True
+
     return False
 
 
-def _predict_single_digit(component: np.ndarray) -> Optional[str]:
+def _predict_single_digit(component: np.ndarray, allowed: Sequence[str]) -> Optional[str]:
     if component.size == 0:
         return None
 
@@ -843,49 +1079,66 @@ def _predict_single_digit(component: np.ndarray) -> Optional[str]:
         else component
     )
 
-    template_pred, template_score = predict_mark_template(component_bgr)
-    if template_pred is not None and template_score >= 0.82:
-        return template_pred
+    # Run both template and CNN and pick the most reliable signal.
+    # CNN tends to be much better on thin digits like '1' where templates can be misleading.
+    cnn_pred, cnn_conf = predict_mark_cnn_restricted(component_bgr, allowed)
+    template_pred, template_score = predict_mark_template_restricted(component_bgr, allowed)
 
-    cnn_pred, cnn_conf = predict_mark_cnn(component_bgr)
-    if cnn_pred.isdigit() and cnn_conf >= 0.92:
+    if cnn_pred.isdigit() and cnn_conf >= 0.85:
+        return cnn_pred
+    if template_pred is not None and template_score >= 0.80:
+        return template_pred
+    if cnn_pred.isdigit() and cnn_conf >= 0.55:
         return cnn_pred
 
     ocr_pred, ocr_conf = predict_mark_easyocr(component_bgr)
-    if ocr_pred and ocr_pred.isdigit() and ocr_conf >= 0.55:
-        return ocr_pred[-1]
+    if ocr_pred and ocr_conf >= 0.35:
+        extracted = _extract_digits_from_text(ocr_pred, max_mark=max(int(a) for a in allowed if str(a).isdigit()))
+        if extracted is not None and extracted.isdigit():
+            return extracted[-1]
     return None
 
 
 def predict_mark_combined(crop_img: np.ndarray, max_mark: int) -> str:
-    if is_likely_dash(crop_img):
+    # Empty cell means "not attempted" (dash in our output).
+    if is_empty_cell(crop_img) or is_likely_dash(crop_img):
         return "-"
+
+    allowed = [str(i) for i in range(0, max_mark + 1)]
+
+    # Fast path: segment components and take the rightmost digit (marks are written like "02"/"01").
+    digit_images = _segment_digit_images(crop_img)
+    if digit_images:
+        rightmost = digit_images[-1]
+        digit = _predict_single_digit(rightmost, allowed)
+        if digit is not None and digit.isdigit() and int(digit) <= max_mark:
+            return digit
 
     whole_ocr_pred, whole_ocr_conf = predict_mark_easyocr(crop_img)
     whole_ocr_value = _extract_digits_from_text(whole_ocr_pred, max_mark)
-    if whole_ocr_value == "0":
-        whole_ocr_value = "-"
-
-    if whole_ocr_value is not None and whole_ocr_value != "-" and whole_ocr_conf >= 0.82:
+    # If OCR sees something plausible like "02" / "01" / "5", trust it fairly early.
+    if whole_ocr_value is not None and whole_ocr_value != "-" and whole_ocr_conf >= 0.55:
         return whole_ocr_value
 
     right_digit_crop = _extract_right_digit_crop(crop_img)
     if right_digit_crop is None:
-        if whole_ocr_value is not None and whole_ocr_conf >= 0.45:
+        if whole_ocr_value is not None and whole_ocr_conf >= 0.35:
             return whole_ocr_value
+        # Last resort: restricted CNN over the full crop (prevents 8/9 on max=2/5 rows).
+        cnn_pred, cnn_conf = predict_mark_cnn_restricted(crop_img, allowed)
+        if cnn_pred.isdigit() and int(cnn_pred) <= max_mark and cnn_conf >= 0.25:
+            return cnn_pred
         return "-"
 
     if right_digit_crop is not None:
-        right_digit = _predict_single_digit(right_digit_crop)
-        if right_digit == "0":
-            return "-"
+        right_digit = _predict_single_digit(right_digit_crop, allowed)
         if right_digit is not None and int(right_digit) <= max_mark:
             return right_digit
 
     digit_images = _segment_digit_images(crop_img)
     digit_values: List[str] = []
     for digit_img in digit_images[:2]:
-        digit = _predict_single_digit(digit_img)
+        digit = _predict_single_digit(digit_img, allowed)
         if digit is not None:
             digit_values.append(digit)
 
@@ -897,8 +1150,8 @@ def predict_mark_combined(crop_img: np.ndarray, max_mark: int) -> str:
     if whole_ocr_value is not None and whole_ocr_conf >= 0.45:
         return whole_ocr_value
 
-    cnn_pred, cnn_conf = predict_mark_cnn(crop_img)
-    if cnn_pred.isdigit() and int(cnn_pred) <= max_mark and cnn_conf >= 0.98:
+    cnn_pred, cnn_conf = predict_mark_cnn_restricted(crop_img, allowed)
+    if cnn_pred.isdigit() and int(cnn_pred) <= max_mark and cnn_conf >= 0.20:
         return cnn_pred
 
     return "-"
@@ -933,13 +1186,14 @@ def _crop_with_padding(
 
 
 def process_image(img_path: str, session_folder: str = None, is_webcam: bool = False) -> Tuple[List[Dict], int, str]:
-    img = cv2.imread(img_path)
+    img = load_image_bgr(img_path)
     if img is None:
         raise Exception("Failed to load image")
 
     img = deskew_image(img, is_webcam=is_webcam)
     normalized = locate_marksheet(img)
     normalized = enhance_image(normalized)
+    normalized = refine_alignment(normalized)
 
     debug_img = normalized.copy()
     extracted_data: List[Dict[str, str]] = []
