@@ -456,17 +456,33 @@ def _roi_horizontal_lines(binary: np.ndarray, x1: int, x2: int) -> List[int]:
         return []
 
     h, w = roi.shape
-    kernel_w = max(int(w * 0.75), 40)
+    # Don't require nearly-full-width lines; phone scans often break grid lines.
+    kernel_w = max(int(w * 0.45), 30)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_w, 1))
-    line_img = cv2.morphologyEx(roi, cv2.MORPH_OPEN, kernel, iterations=2)
+    line_img = cv2.morphologyEx(roi, cv2.MORPH_OPEN, kernel, iterations=1)
     contours, _ = cv2.findContours(line_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     ys = []
     for c in contours:
         x, y, cw, ch = cv2.boundingRect(c)
-        if cw < w * 0.55:
+        if cw < w * 0.40:
             continue
         ys.append(int(y + ch / 2))
-    return _merge_close_positions(ys, gap=10)
+
+    ys = _merge_close_positions(ys, gap=10)
+
+    # Hough fallback for faint/broken separators.
+    if len(ys) < 9:
+        edges = cv2.Canny(roi, 40, 140, apertureSize=3)
+        min_len = max(int(w * 0.35), 80)
+        lines = cv2.HoughLinesP(edges, 1, np.pi / 180, 100, minLineLength=min_len, maxLineGap=14)
+        if lines is not None:
+            for line in lines:
+                x1p, y1p, x2p, y2p = (int(v) for v in line[0])
+                if abs(y2p - y1p) <= 6 and abs(x2p - x1p) >= min_len:
+                    ys.append(int((y1p + y2p) / 2))
+        ys = _merge_close_positions(ys, gap=10)
+
+    return ys
 
 
 def _best_11_line_sequence(lines: Sequence[int]) -> Optional[List[int]]:
@@ -496,6 +512,72 @@ def _best_11_line_sequence(lines: Sequence[int]) -> Optional[List[int]]:
     return best_seq
 
 
+def _best_11_line_sequence_anchored(
+    lines: Sequence[int],
+    img_h: int,
+    prefer_start_y: Optional[int],
+    max_end_y: Optional[int],
+) -> Optional[List[int]]:
+    """
+    Choose the best 11 horizontal separators for the 10 Obt cells.
+
+    Critical requirement: must not "shift" when a top cell is blank.
+    So we bias toward the earliest plausible grid sequence (just under the Obt header),
+    rather than anything influenced by handwriting.
+    """
+    if len(lines) < 11:
+        return None
+
+    lines_sorted = sorted(int(y) for y in lines)
+
+    # Expected region for the first separator below the header row in the normalized sheet.
+    # This keeps us from accidentally starting the sequence at Q1.b when OCR anchors are wrong.
+    expected_start = prefer_start_y if prefer_start_y is not None else int(img_h * 0.055)
+    # Don't hard-reject based on start position; different photos/perspective can shift the table.
+    # We'll use a soft penalty instead.
+    start_min = int(img_h * 0.01)
+    start_max = int(img_h * 0.35)
+
+    best_seq: Optional[List[int]] = None
+    best_score: Optional[float] = None
+
+    for start in range(0, len(lines_sorted) - 10):
+        seq = lines_sorted[start : start + 11]
+        if max_end_y is not None and seq[-1] > int(max_end_y):
+            continue
+
+        # Very top/bottom sequences are unlikely (noise), but keep this permissive.
+        if seq[0] < start_min or seq[0] > start_max:
+            start_outside = True
+        else:
+            start_outside = False
+
+        diffs = [seq[i + 1] - seq[i] for i in range(10)]
+        if any(d <= 8 for d in diffs):
+            continue
+
+        mean = float(sum(diffs)) / 10.0
+        var = float(sum((d - mean) ** 2 for d in diffs)) / 10.0
+
+        # Penalize weird cell heights.
+        height_penalty = 0.0
+        if mean < 30 or mean > 120:
+            height_penalty = abs(mean - 72.0)
+
+        # Bias towards the expected header-adjacent start (soft), and extra penalty if it starts very low.
+        start_penalty = abs(float(seq[0] - expected_start)) / float(max(img_h, 1))
+        if start_outside:
+            start_penalty += 0.10
+
+        score = var + height_penalty * 8.0 + start_penalty * 12000.0
+        if best_score is None or score < best_score:
+            best_score = score
+            best_seq = seq
+
+    # As a fallback, return the purely spacing-based selection.
+    return best_seq or _best_11_line_sequence(lines_sorted)
+
+
 def _derive_obt_row_boundaries_from_roi(
     binary: np.ndarray,
     obt_left: int,
@@ -510,37 +592,23 @@ def _derive_obt_row_boundaries_from_roi(
     if len(roi_lines_all) < 11:
         roi_lines_all = sorted(set(_merge_close_positions(_get_line_positions(binary, "horizontal"), gap=10)))
 
-    # Anchor using the printed "Obt." header position: choose the first grid line below it.
-    # If OCR drifts, we still snap to the next real horizontal separator line to avoid row shifting.
-    anchor_y = float(obt_y_bottom) if obt_y_bottom is not None else float(img_h * 0.06)
-    top_line_candidates = [y for y in roi_lines_all if y >= int(anchor_y + 2)]
-    if not top_line_candidates:
-        return _best_11_line_sequence(roi_lines_all)
-    top_line = int(min(top_line_candidates))
+    # Use OCR only as a soft hint. If OCR is wrong/missing, we still pick the top-most plausible grid sequence.
+    prefer_start_y = None
+    if obt_y_bottom is not None:
+        # First separator is typically shortly below the "Obt." header text box.
+        prefer_start_y = int(float(obt_y_bottom) + 12.0)
 
-    # Stop above the "Total" row by snapping to the last separator above the "Total" text.
-    stop_y = float(total_y_top) if total_y_top is not None else float(img_h * 0.72)
-    y_stop = int(stop_y - 2)
-    if y_stop <= top_line:
-        y_stop = int(img_h * 0.72)
+    max_end_y = None
+    if total_y_top is not None:
+        max_end_y = int(float(total_y_top) - 6.0)
 
-    roi_lines = [y for y in roi_lines_all if top_line <= y <= y_stop]
-    roi_lines = sorted(set(roi_lines))
-
-    after = [y for y in roi_lines if y >= top_line]
-    if len(after) >= 11:
-        return after[:11]
-
-    seq = _best_11_line_sequence(roi_lines)
+    seq = _best_11_line_sequence_anchored(roi_lines_all, img_h, prefer_start_y=prefer_start_y, max_end_y=max_end_y)
     if seq is None:
-        # Fallback to global line detection if ROI detection is weak.
-        global_lines = _merge_close_positions(_get_line_positions(binary, "horizontal"), gap=10)
-        global_lines = sorted(set(global_lines))
-        global_lines = [y for y in global_lines if top_line <= y <= y_stop]
-        after_g = [y for y in global_lines if y >= top_line]
-        if len(after_g) >= 11:
-            return after_g[:11]
-        seq = _best_11_line_sequence(global_lines)
+        return None
+
+    # Final sanity: ensure it's increasing and within bounds.
+    if len(seq) != 11 or any(seq[i + 1] <= seq[i] for i in range(10)):
+        return None
     return seq
 
 
@@ -560,13 +628,28 @@ def detect_obt_cells(img: np.ndarray, is_webcam: bool = False) -> Optional[List[
 
     obt_x_center, obt_y_bottom, total_y_top = _ocr_find_obt_and_total_anchors(img)
 
-    # Vertical lines inside the table region (captures inner grid lines, not just the outer border).
+    # The sheet has a fixed template after perspective normalization. Rely on that first.
+    # This prevents catastrophic "tiny column" errors (e.g., 10-20px wide) which destroy digit crops.
+    default_left = int(img.shape[1] * 0.700)
+    default_right = int(img.shape[1] * 0.972)
+    obt_left, obt_right = default_left, default_right
+
+    # Optional improvement: snap to detected vertical grid lines, but only if it yields a sane width.
     y2_table = int((total_y_top or (img.shape[0] * 0.74)) + 40)
     v_lines = _table_vertical_lines(binary, y1=int(img.shape[0] * 0.02), y2=y2_table)
     if len(v_lines) < 4:
         v_lines = _get_line_positions(binary, "vertical")
 
-    obt_left, obt_right = _pick_obt_column_bounds(v_lines, obt_x_center, img.shape[1])
+    picked_left, picked_right = _pick_obt_column_bounds(v_lines, obt_x_center, img.shape[1])
+    picked_w = picked_right - picked_left
+    picked_center = (picked_left + picked_right) / 2.0
+    # Only accept a snapped column if it is plausibly the right-most Obt. column.
+    if (
+        picked_w >= int(img.shape[1] * 0.18)
+        and picked_w <= int(img.shape[1] * 0.40)
+        and picked_center >= float(img.shape[1]) * 0.62
+    ):
+        obt_left, obt_right = picked_left, picked_right
     row_lines = _derive_obt_row_boundaries_from_roi(binary, obt_left, obt_right, obt_y_bottom, total_y_top)
     if row_lines is None or len(row_lines) != 11:
         return None
@@ -1100,59 +1183,55 @@ def _predict_single_digit(component: np.ndarray, allowed: Sequence[str]) -> Opti
 
 
 def predict_mark_combined(crop_img: np.ndarray, max_mark: int) -> str:
-    # Empty cell means "not attempted" (dash in our output).
-    if is_empty_cell(crop_img) or is_likely_dash(crop_img):
+    # If teacher draws a dash for "not attempted", keep treating it as blank.
+    if is_likely_dash(crop_img):
         return "-"
 
-    allowed = [str(i) for i in range(0, max_mark + 1)]
+    # Output domain: marks are 1..max_mark (leading zero is not a mark).
+    allowed_out = [str(i) for i in range(1, max_mark + 1)]
 
-    # Fast path: segment components and take the rightmost digit (marks are written like "02"/"01").
+    # 0) If OCR confidently reads a valid value like "02"/"05", trust it.
+    # This fixes common confusions like 5->2 from shape-only classifiers.
+    whole_ocr_pred, whole_ocr_conf = predict_mark_easyocr(crop_img)
+    whole_ocr_value = _extract_digits_from_text(whole_ocr_pred, max_mark)
+    if (
+        whole_ocr_value is not None
+        and whole_ocr_value.isdigit()
+        and 1 <= int(whole_ocr_value) <= max_mark
+        and whole_ocr_conf >= 0.88
+    ):
+        return whole_ocr_value
+
+    # 1) Primary: segment components and classify the rightmost digit.
+    # This matches the real mark format: "02", "01", "05" -> rightmost digit is the mark.
     digit_images = _segment_digit_images(crop_img)
     if digit_images:
         rightmost = digit_images[-1]
-        digit = _predict_single_digit(rightmost, allowed)
-        if digit is not None and digit.isdigit() and int(digit) <= max_mark:
-            return digit
+        pred = _predict_single_digit(rightmost, allowed_out)
+        if pred is not None and pred.isdigit() and 1 <= int(pred) <= max_mark:
+            return pred
 
-    whole_ocr_pred, whole_ocr_conf = predict_mark_easyocr(crop_img)
-    whole_ocr_value = _extract_digits_from_text(whole_ocr_pred, max_mark)
-    # If OCR sees something plausible like "02" / "01" / "5", trust it fairly early.
-    if whole_ocr_value is not None and whole_ocr_value != "-" and whole_ocr_conf >= 0.55:
+        # If the rightmost component is noise, try the second-rightmost.
+        if len(digit_images) >= 2:
+            pred2 = _predict_single_digit(digit_images[-2], allowed_out)
+            if pred2 is not None and pred2.isdigit() and 1 <= int(pred2) <= max_mark:
+                return pred2
+
+    # 2) OCR fallback on whole cell crop (less strict than the confident path above).
+    if (
+        whole_ocr_value is not None
+        and whole_ocr_value.isdigit()
+        and 1 <= int(whole_ocr_value) <= max_mark
+        and whole_ocr_conf >= 0.65
+    ):
         return whole_ocr_value
 
+    # 3) Last resort: try isolating the right digit region and classify again.
     right_digit_crop = _extract_right_digit_crop(crop_img)
-    if right_digit_crop is None:
-        if whole_ocr_value is not None and whole_ocr_conf >= 0.35:
-            return whole_ocr_value
-        # Last resort: restricted CNN over the full crop (prevents 8/9 on max=2/5 rows).
-        cnn_pred, cnn_conf = predict_mark_cnn_restricted(crop_img, allowed)
-        if cnn_pred.isdigit() and int(cnn_pred) <= max_mark and cnn_conf >= 0.25:
-            return cnn_pred
-        return "-"
-
     if right_digit_crop is not None:
-        right_digit = _predict_single_digit(right_digit_crop, allowed)
-        if right_digit is not None and int(right_digit) <= max_mark:
+        right_digit = _predict_single_digit(right_digit_crop, allowed_out)
+        if right_digit is not None and right_digit.isdigit() and 1 <= int(right_digit) <= max_mark:
             return right_digit
-
-    digit_images = _segment_digit_images(crop_img)
-    digit_values: List[str] = []
-    for digit_img in digit_images[:2]:
-        digit = _predict_single_digit(digit_img, allowed)
-        if digit is not None:
-            digit_values.append(digit)
-
-    if digit_values:
-        numeric = _extract_digits_from_text("".join(digit_values), max_mark)
-        if numeric is not None:
-            return numeric
-
-    if whole_ocr_value is not None and whole_ocr_conf >= 0.45:
-        return whole_ocr_value
-
-    cnn_pred, cnn_conf = predict_mark_cnn_restricted(crop_img, allowed)
-    if cnn_pred.isdigit() and int(cnn_pred) <= max_mark and cnn_conf >= 0.20:
-        return cnn_pred
 
     return "-"
 
