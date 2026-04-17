@@ -325,6 +325,8 @@
         const webcamStopBtn = document.getElementById('webcamStopBtn');
         const webcamStatus = document.getElementById('webcamStatus');
         const webcamFlash = document.getElementById('webcamFlash');
+        const sessionId = sessionStorage.getItem('marksense_session_id') || `session_${Date.now()}`;
+        sessionStorage.setItem('marksense_session_id', sessionId);
         let webcamStream = null;
         
         let currentMode = 'single';
@@ -470,7 +472,7 @@
                     body: JSON.stringify({
                         image: imageData,
                         roll_number: rollNum,
-                        session_id: 'default_session'
+                        session_id: sessionId
                     })
                 });
                 const data = await response.json();
@@ -511,7 +513,7 @@
                     addHistoryRecord(data.roll_number, data.total, data.results);
 
                     if (data.debug_img) {
-                        imagePreview.src = `/download/default_session/${data.debug_img}`;
+                        imagePreview.src = `/download/${data.session_id || sessionId}/${data.debug_img}`;
                     }
 
                     webcamStatus.textContent = 'Scan complete!';
@@ -717,7 +719,7 @@
                         addHistoryRecord(data.roll_number, data.total, data.results);
                         
                         if (data.debug_img) {
-                            imagePreview.src = `/download/default_session/${data.debug_img}`;
+                            imagePreview.src = `/download/${data.session_id || sessionId}/${data.debug_img}`;
                         }
                     }
                 } catch (err) {
@@ -778,7 +780,7 @@
                 const formData = new FormData();
                 formData.append('roll_number', rollNumberInput.value);
                 formData.append('file', fileInput.files[0]);
-                formData.append('session_id', 'default_session');
+                formData.append('session_id', sessionId);
 
                 // Trigger animations
                 document.querySelector('.desk-container').classList.add('layout-scanning');
@@ -826,7 +828,7 @@
                         addHistoryRecord(data.roll_number, data.total, data.results);
                         
                         if (data.debug_img) {
-                            imagePreview.src = `/download/default_session/${data.debug_img}`;
+                            imagePreview.src = `/download/${data.session_id || sessionId}/${data.debug_img}`;
                         }
                     } else {
                         showToast(data.error || "Unknown telemetry error during processing.", 'error');
@@ -846,7 +848,7 @@
                 
                 const formData = new FormData();
                 formData.append('file', fileInput.files[0]);
-                formData.append('session_id', 'default_session');
+                formData.append('session_id', sessionId);
                 
                 document.querySelector('.desk-container').classList.add('layout-scanning');
                 document.body.classList.add('scanning-mode');
@@ -900,7 +902,7 @@
                 card.className = 'pdf-card';
                 card.innerHTML = `
                     <div class="pdf-badge">Roll ${item.roll_number}</div>
-                    <img src="/download/default_session/${item.debug_img}" alt="Marksheet preview">
+                    <img src="/download/${item.session_id || sessionId}/${item.debug_img}" alt="Marksheet preview">
                     <div class="pdf-score">Total: ${item.total}</div>
                 `;
                 card.onclick = () => openSingleEditorFromBatch(index);
@@ -938,7 +940,7 @@
             totalMarkValue.textContent = data.total;
             recalculateTotal();
             if (data.debug_img) {
-                imagePreview.src = `/download/default_session/${data.debug_img}`;
+                imagePreview.src = `/download/${data.session_id || sessionId}/${data.debug_img}`;
                 rightPreviewContainer.classList.remove('hidden');
             }
         }
@@ -978,7 +980,7 @@
             }
             
             const payload = {
-                session_id: 'default_session',
+                session_id: sessionId,
                 session_history: sessionHistory
             };
             
@@ -1021,7 +1023,7 @@
                 roll_number: currentUploadedData.roll_number,
                 results: getGridResults(),
                 excel_file: currentUploadedData.excel_file,
-                session_id: 'default_session'
+                session_id: currentUploadedData.session_id || sessionId
             };
 
             try {
@@ -1068,7 +1070,7 @@
                 exportBtn.innerHTML = "Exporting Session...";
 
                 const payload = {
-                    session_id: 'default_session',
+                    session_id: sessionId,
                     session_history: sessionHistory
                 };
 
@@ -1113,7 +1115,7 @@
                 const payload = {
                     roll_number: currentUploadedData.roll_number,
                     results: getGridResults(),
-                    session_id: 'default_session'
+                    session_id: currentUploadedData.session_id || sessionId
                 };
 
                 try {

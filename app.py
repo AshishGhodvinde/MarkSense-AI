@@ -67,6 +67,7 @@ def mobile_upload():
                     'results': results,
                     'total': total,
                     'roll_number': roll_number,
+                    'session_id': session_id,
                     'excel_file': excel_filename,
                     'debug_img': debug_img
                 }
@@ -119,11 +120,20 @@ def upload_file():
                     'results': results,
                     'total': total,
                     'roll_number': roll_number,
+                    'session_id': session_id,
                     'excel_file': excel_filename,
                     'debug_img': debug_filename
                 })
             
-            return render_template('result.html', results=results, total=total, roll_number=roll_number, excel_file=excel_filename, debug_img=debug_filename)
+            return render_template(
+                'result.html',
+                results=results,
+                total=total,
+                roll_number=roll_number,
+                excel_file=excel_filename,
+                debug_img=debug_filename,
+                session_id=session_id
+            )
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -187,6 +197,7 @@ def upload_pdf():
                 
                 all_results.append({
                     'roll_number': roll_number,
+                    'session_id': session_id,
                     'results': results,
                     'total': total,
                     'debug_img': debug_filename,
@@ -255,6 +266,7 @@ def webcam_capture():
             'results': results,
             'total': total,
             'roll_number': roll_number,
+            'session_id': session_id,
             'excel_file': excel_filename,
             'debug_img': debug_filename
         })
@@ -348,7 +360,14 @@ def get_ngrok_url():
 @app.route('/download/<session_id>/<filename>')
 def download_file(session_id, filename):
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], session_id, filename)
-    return send_file(filepath, as_attachment=True)
+    ext = os.path.splitext(filename)[1].lower()
+    return send_file(filepath, as_attachment=ext not in {'.png', '.jpg', '.jpeg', '.webp'})
+
+@app.route('/download/<filename>')
+def download_file_legacy(filename):
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], 'default_session', filename)
+    ext = os.path.splitext(filename)[1].lower()
+    return send_file(filepath, as_attachment=ext not in {'.png', '.jpg', '.jpeg', '.webp'})
 
 def start_ngrok_tunnel(port):
     """Starts a public tunnel using ngrok"""

@@ -62,12 +62,12 @@
                                 Neural Vision Core Bounding Diagram
                             </h3>
                             <div style="background: #ffffff; padding: 1rem; border-radius: 16px; border: 1px solid #e2e8f0; box-shadow: var(--shadow-sm);">
-                                <img src="/download/{{ debug_img }}" alt="Contour Topology" style="width: 100%; display: block; border-radius: 8px;">
+                                <img src="/download/{{ session_id|default('default_session') }}/{{ debug_img }}" alt="Contour Topology" style="width: 100%; display: block; border-radius: 8px;">
                             </div>
                         </div>
                         
                         <div style="text-align: center; margin-top: 3rem;">
-                            <a href="/download/{{ excel_file }}" class="btn-modern btn-success" style="padding: 1.25rem 3rem;">
+                            <a href="/download/{{ session_id|default('default_session') }}/{{ excel_file }}" class="btn-modern btn-success" style="padding: 1.25rem 3rem;">
                                 <svg style="width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2; margin-right: 0.5rem;" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                                 Obtain Verified Database (.xlsx)
                             </a>
