@@ -40,3 +40,9 @@ typing_extensions==4.15.0
 tzdata==2025.3
 Werkzeug==3.1.6
 PyMuPDF==1.25.5
+transformers>=4.40.0
+huggingface-hub
+accelerate
+pandas
+pyarrow
+fastparquet

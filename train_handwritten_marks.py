@@ -24,17 +24,26 @@ class MarksheetDigitDataset(Dataset):
 
             for filename in os.listdir(digit_dir):
                 if filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
-                    self.samples.append((os.path.join(digit_dir, filename), label))
+                    # Simple check for corrupted files
+                    full_path = os.path.join(digit_dir, filename)
+                    if os.path.getsize(full_path) > 10:
+                        self.samples.append((full_path, label))
 
     def __len__(self) -> int:
         return len(self.samples)
 
     def __getitem__(self, index: int):
         img_path, label = self.samples[index]
-        image = Image.open(img_path).convert("L")
-        if self.transform is not None:
-            image = self.transform(image)
-        return image, label
+        try:
+            image = Image.open(img_path).convert("L")
+            if self.transform is not None:
+                image = self.transform(image)
+            return image, label
+        except Exception as e:
+            print(f"Error loading image {img_path}: {e}")
+            # Return a dummy zero image if one fails, to keep the batch consistent
+            dummy = torch.zeros((1, 28, 28))
+            return dummy, label
 
 
 def create_train_transform():
